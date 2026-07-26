@@ -1,55 +1,27 @@
-import { handleChatStream } from '@mastra/ai-sdk'
-import { toAISdkV5Messages } from '@mastra/ai-sdk/ui'
-import { createUIMessageStreamResponse } from 'ai'
-import { NextResponse } from 'next/server'
+import { handleChatStream } from '@mastra/ai-sdk';
+import { createUIMessageStreamResponse } from 'ai';
 
-import { mastra } from '@/mastra'
+import { mastra } from '@/mastra';
+import { clientTools } from '@/mastra/tools/document-tools';
 
-const RESOURCE_ID = 'weather-chat'
+export const runtime = 'nodejs';
 
-export async function POST(req: Request) {
-  const { threadId, ...params } = await req.json()
-  const currentThreadId = threadId || crypto.randomUUID()
+export async function POST(request: Request) {
+  const params = await request.json();
 
   const stream = await handleChatStream({
     mastra,
-    agentId: 'weather-agent',
+    agentId: 'document-agent',
     params: {
       ...params,
-      memory: {
-        ...params.memory,
-        thread: currentThreadId,
-        resource: RESOURCE_ID,
-      },
+      clientTools,
+      maxSteps: 5,
     },
-  })
+  });
 
   return createUIMessageStreamResponse({
-    stream: stream as unknown as Parameters<typeof createUIMessageStreamResponse>[0]['stream'],
-  })
-}
-
-export async function GET(req: Request) {
-  const memory = await mastra.getAgentById('weather-agent').getMemory()
-
-  const threadId = new URL(req.url).searchParams.get('threadId')
-
-  if (!threadId) {
-    return NextResponse.json([])
-  }
-
-  let response = null
-
-  try {
-    response = await memory?.recall({
-      threadId,
-      resourceId: RESOURCE_ID,
-    })
-  } catch {
-    console.log('No previous messages found.')
-  }
-
-  const uiMessages = toAISdkV5Messages(response?.messages || [])
-
-  return NextResponse.json(uiMessages)
+    stream: stream as unknown as Parameters<
+      typeof createUIMessageStreamResponse
+    >[0]['stream'],
+  });
 }

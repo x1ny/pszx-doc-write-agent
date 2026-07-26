@@ -1,36 +1,23 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 公文写作 Agent
 
-## Getting Started
+基于 Next.js、Mastra、AI SDK 和 Plate 构建的公文写作工作台，包含文档编辑器和 AI 写作助手。
 
-First, run the development server:
+## 开始使用
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+安装依赖：\`pnpm install\`
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+配置 `.env.local`：
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+启动开发服务器：\`pnpm dev\`
 
-## Learn More
+主要路由：
 
-To learn more about Next.js, take a look at the following resources:
+- `/`：文档编辑器与 AI 助手工作台
+- `/editor`：独立文档编辑器
+- `/api/chat`：Mastra Agent 的 AI 助手流式接口
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+文档内容仅保存在当前页面状态中，刷新页面后不会持久化。

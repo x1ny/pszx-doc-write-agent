@@ -20,12 +20,6 @@ import { ArticleOutlineEditor } from "@/components/article-outline-editor"
 import { Button } from "@/components/ui/button"
 import { useDocumentEditor } from "@/components/editor/document-editor-context"
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from "@/components/ui/input-group"
-import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
@@ -222,6 +216,55 @@ export function AgentChat() {
     void sendMessage({ text: prompt })
   }
 
+  const composer = (
+    <div className="w-full">
+      <form onSubmit={handleSubmit}>
+        <div
+          className={cn(
+            "relative flex w-full flex-col overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)] transition-colors focus-within:border-[#3370ff]",
+            messages.length === 0 ? "h-32 min-h-32" : "h-28 min-h-28"
+          )}
+        >
+          <div className="min-h-[3.75rem] flex-1 overflow-hidden px-4 pt-3.5">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+              placeholder="输入消息…"
+              aria-label="输入消息"
+              rows={messages.length === 0 ? 2 : 1}
+              disabled={isBusy}
+              className="block h-full min-h-0 w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[15px] text-[#1f2329] outline-none ring-0 placeholder:text-[#8f959e] disabled:cursor-not-allowed disabled:opacity-60 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            />
+          </div>
+          <div className="flex shrink-0 justify-end px-3 pb-3">
+            <button
+              type="submit"
+              disabled={isBusy || !input.trim()}
+              aria-label="发送消息"
+              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg bg-[#3370ff] text-white transition-colors outline-none hover:bg-[#3370ff]/90 focus-visible:ring-3 focus-visible:ring-[#3370ff]/30 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {isBusy ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Send className="size-4" aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+      </form>
+      <p className="mt-2 text-center text-xs text-muted-foreground">
+        Enter 发送 · Shift + Enter 换行
+      </p>
+    </div>
+  )
+
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
       {hasDocument && !isEditorOpen && (
@@ -233,18 +276,20 @@ export function AgentChat() {
         </div>
       )}
 
-      <div className="min-h-0 flex-1">
-        <MessageScrollerProvider autoScroll>
-          <MessageScroller className="h-full">
-            <MessageScrollerViewport aria-label="消息">
-              <MessageScrollerContent
-                className={cn(
-                  "mx-auto w-full max-w-[1000px] gap-8 px-8 py-6",
-                  messages.length === 0 && "justify-center"
-                )}
-              >
+      <div className="min-h-0 flex-1 px-8">
+        <div className="mx-auto flex h-full w-full max-w-[1000px] flex-col">
+          <div className="min-h-0 flex-1">
+            <MessageScrollerProvider autoScroll>
+              <MessageScroller className="h-full">
+                <MessageScrollerViewport aria-label="消息">
+                  <MessageScrollerContent
+                    className={cn(
+                      "gap-8 py-6",
+                      messages.length === 0 && "justify-center"
+                    )}
+                  >
                 {messages.length === 0 ? (
-                  <MessageScrollerItem className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
+                  <MessageScrollerItem className="flex flex-1 flex-col items-center justify-center gap-5 py-16 text-center">
                     <div className="flex size-14 items-center justify-center rounded-2xl bg-muted">
                       <Bot className="size-7 text-muted-foreground" aria-hidden="true" />
                     </div>
@@ -254,6 +299,24 @@ export function AgentChat() {
                         我可以协助你起草、修改和完善公文。
                       </p>
                     </div>
+                    <div className="flex w-full max-w-2xl flex-wrap justify-center gap-2.5">
+                      {["请帮我写一篇公文：关于推动人工智能发展的建议"].map(
+                        (prompt) => (
+                          <Button
+                            key={prompt}
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={isBusy}
+                            onClick={() => handleSuggestedPrompt(prompt)}
+                            className="h-auto rounded-full border-0 bg-[#f3f4f6] px-4 py-2.5 text-left text-sm font-normal leading-snug text-[#646a73] hover:bg-[#e8eaed] hover:text-[#1f2329]"
+                          >
+                            {prompt}
+                          </Button>
+                        )
+                      )}
+                    </div>
+                    {composer}
                   </MessageScrollerItem>
                 ) : (
                   messages.map((message) => {
@@ -410,33 +473,17 @@ export function AgentChat() {
                     请求失败：{error.message || "请稍后重试"}
                   </MessageScrollerItem>
                 )}
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-            <MessageScrollerButton />
-          </MessageScroller>
-        </MessageScrollerProvider>
-      </div>
-
-      <footer className="shrink-0 px-8 pb-6 pt-3">
-        {messages.length === 0 && (
-          <div className="mx-auto mb-3 flex w-full max-w-[1000px] flex-wrap justify-center gap-2">
-            {["请帮我写一篇公文：关于推动人工智能发展的建议"].map((prompt) => (
-              <Button
-                key={prompt}
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={isBusy}
-                onClick={() => handleSuggestedPrompt(prompt)}
-              >
-                {prompt}
-              </Button>
-            ))}
+                  </MessageScrollerContent>
+                </MessageScrollerViewport>
+                <MessageScrollerButton />
+              </MessageScroller>
+            </MessageScrollerProvider>
           </div>
-        )}
 
-        {selectedReference && (
-          <div className="mx-auto mb-2 flex w-full max-w-[1000px] items-start gap-2 rounded-lg border bg-muted/50 p-2.5 text-sm">
+          {messages.length > 0 && (
+            <footer className="shrink-0 pb-6 pt-3">
+            {selectedReference && (
+              <div className="mb-2 flex w-full items-start gap-2 rounded-lg border bg-muted/50 p-2.5 text-sm">
             <MessageSquareQuote className="mt-0.5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <p className="font-medium">已选中的文档内容</p>
@@ -453,43 +500,13 @@ export function AgentChat() {
             >
               <X />
             </Button>
-          </div>
-        )}
-
-        <form className="mx-auto w-full max-w-[1000px]" onSubmit={handleSubmit}>
-          <InputGroup className="min-h-12 rounded-2xl bg-background shadow-sm">
-            <InputGroupTextarea
-              ref={inputRef}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  event.currentTarget.form?.requestSubmit()
-                }
-              }}
-              placeholder="输入消息…"
-              aria-label="输入消息"
-              rows={2}
-              disabled={isBusy}
-              className="max-h-32 min-h-12 resize-none px-4 py-3"
-            />
-            <InputGroupAddon align="inline-end" className="pr-3">
-              <InputGroupButton
-                type="submit"
-                size="icon-sm"
-                disabled={isBusy || !input.trim()}
-                aria-label="发送消息"
-              >
-                {isBusy ? <Loader2 className="animate-spin" /> : <Send />}
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
-        </form>
-        <p className="mx-auto mt-2 w-full max-w-[1000px] text-center text-xs text-muted-foreground">
-          Enter 发送 · Shift + Enter 换行
-        </p>
-      </footer>
+              </div>
+            )}
+            {composer}
+            </footer>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

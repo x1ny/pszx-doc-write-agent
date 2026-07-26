@@ -7,28 +7,18 @@ import {
   AlertTriangle,
   Bot,
   Database,
+  FileText,
   Loader2,
   MessageSquareQuote,
   Send,
-  Sparkles,
   X,
-  User,
 } from "lucide-react"
 import { FormEvent, useEffect, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
 import { Button } from "@/components/ui/button"
 import { useDocumentEditor } from "@/components/editor/document-editor-context"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import {
   InputGroup,
   InputGroupAddon,
@@ -43,7 +33,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
-import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import type { AssistantAgentUIMessage } from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
@@ -51,6 +40,18 @@ import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
 const transport = new DefaultChatTransport({ api: "/api/chat" })
 
 const selectionContextPattern = /<document_selection>([\s\S]*?)<\/document_selection>\s*/
+
+function parseOutlineInput(input: unknown) {
+  if (typeof input === "string") {
+    try {
+      return outlineSchema.safeParse(JSON.parse(input))
+    } catch {
+      return outlineSchema.safeParse(undefined)
+    }
+  }
+
+  return outlineSchema.safeParse(input)
+}
 
 function renderUserMessage(text: string, key: string) {
   const match = text.match(selectionContextPattern)
@@ -80,8 +81,11 @@ export function AgentChat() {
   const streamedMarkdownRef = useRef(new Map<string, string>())
   const {
     applyLocalEdit,
+    hasDocument,
+    isEditorOpen,
     readDocument,
     registerPromptAppender,
+    revealEditor,
     writeMarkdown,
   } = useDocumentEditor()
   const { messages, sendMessage, addToolOutput, status, error } =
@@ -127,6 +131,7 @@ export function AgentChat() {
             markdown !== streamedMarkdownRef.current.get(part.toolCallId)
           ) {
             streamedMarkdownRef.current.set(part.toolCallId, markdown)
+            revealEditor()
             writeMarkdown(markdown)
           }
 
@@ -142,6 +147,7 @@ export function AgentChat() {
 
         handledMarkdownToolsRef.current.add(part.toolCallId)
         writeMarkdown(part.input.markdown)
+        revealEditor()
         addToolOutput({
           tool: "writeMarkdownToPlate",
           toolCallId: part.toolCallId,
@@ -149,7 +155,7 @@ export function AgentChat() {
         })
       }
     }
-  }, [addToolOutput, messages, writeMarkdown])
+  }, [addToolOutput, messages, revealEditor, writeMarkdown])
 
   const handledDocumentToolsRef = useRef(new Set<string>())
 
@@ -207,228 +213,230 @@ export function AgentChat() {
     await sendMessage({ text: messageText })
   }
 
-  function handleSuggestedPrompt() {
+  function handleSuggestedPrompt(prompt: string) {
     if (isBusy) {
       return
     }
 
     setInput("")
-    void sendMessage({
-      text: "请帮我写一篇公文：关于推动人工智能发展的建议",
-    })
+    void sendMessage({ text: prompt })
   }
 
   return (
-    <Card className="flex h-[calc(100svh-3rem)] min-h-[36rem] w-full max-w-xl flex-col">
-      <CardHeader className="gap-3 border-b">
-        <div className="flex items-center gap-3">
-          <Avatar size="lg" className="rounded-xl">
-            <AvatarFallback className="rounded-xl bg-primary text-primary-foreground">
-              <Sparkles aria-hidden="true" />
-            </AvatarFallback>
-          </Avatar>
-          <div className="min-w-0">
-            <CardTitle>公文写作助手</CardTitle>
-            <CardDescription>品尚征信 · Early Preview</CardDescription>
-          </div>
+    <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
+      {hasDocument && !isEditorOpen && (
+        <div className="flex h-12 shrink-0 items-center justify-end border-b px-6">
+          <Button type="button" variant="outline" size="sm" onClick={revealEditor}>
+            <FileText data-icon="inline-start" />
+            打开文档
+          </Button>
         </div>
-      </CardHeader>
+      )}
 
-      <CardContent className="min-h-0 flex-1 p-0">
+      <div className="min-h-0 flex-1">
         <MessageScrollerProvider autoScroll>
           <MessageScroller className="h-full">
             <MessageScrollerViewport aria-label="消息">
-              <MessageScrollerContent className="gap-10 p-5">
-            {messages.length === 0 ? (
-              <MessageScrollerItem className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
-                <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
-                  <Bot className="size-6 text-muted-foreground" aria-hidden="true" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <p className="font-medium">你好，我是你的公文写作助手</p>
-                  <p className="text-sm text-muted-foreground">
-                    请问你需要我帮你写什么类型的公文？
-                  </p>
-                </div>
-              </MessageScrollerItem>
-            ) : (
-              messages.map((message) => {
-                const isUser = message.role === "user"
+              <MessageScrollerContent
+                className={cn(
+                  "mx-auto w-full max-w-[1000px] gap-8 px-8 py-6",
+                  messages.length === 0 && "justify-center"
+                )}
+              >
+                {messages.length === 0 ? (
+                  <MessageScrollerItem className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
+                    <div className="flex size-14 items-center justify-center rounded-2xl bg-muted">
+                      <Bot className="size-7 text-muted-foreground" aria-hidden="true" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xl font-semibold">有什么我能帮你的吗？</p>
+                      <p className="text-sm text-muted-foreground">
+                        我可以协助你起草、修改和完善公文。
+                      </p>
+                    </div>
+                  </MessageScrollerItem>
+                ) : (
+                  messages.map((message) => {
+                    const isUser = message.role === "user"
 
-                return (
-                  <MessageScrollerItem
-                    key={message.id}
-                    messageId={message.id}
-                    scrollAnchor={isUser}
-                    className="flex w-full"
-                  >
-                  <div
-                    className={`flex w-full items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}
-                  >
-                    {!isUser && (
-                      <Avatar size="sm" aria-hidden="true">
-                        <AvatarFallback>
-                          <Bot />
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                    <div
-                      className={cn(
-                        "max-w-[82%] text-sm leading-6",
-                        !isUser && "flex flex-col gap-4",
-                        isUser &&
-                          "rounded-xl bg-primary px-3.5 py-2.5 text-primary-foreground whitespace-pre-wrap"
-                      )}
-                    >
-                      {isUser ? (
-                        message.parts.map((part, index) =>
-                          part.type === "text"
-                            ? renderUserMessage(part.text, `${message.id}-${index}`)
-                            : null
-                        )
-                      ) : (
-                        <>
-                          <Streamdown isAnimating={isBusy}>
-                            {message.parts
-                              .filter((part) => part.type === "text")
-                              .map((part) => part.text)
-                              .join("")}
-                          </Streamdown>
-                          {message.parts.map((part) => {
-                            if (part.type !== "tool-verifyKnowledgeBase") {
+                    return (
+                      <MessageScrollerItem
+                        key={message.id}
+                        messageId={message.id}
+                        scrollAnchor={isUser}
+                        className="flex w-full"
+                      >
+                        <div
+                          className={cn(
+                            "flex w-full items-start",
+                            isUser ? "justify-end" : "justify-start"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "text-sm leading-7",
+                              isUser
+                                ? "max-w-[72%] rounded-2xl bg-muted px-4 py-2.5 text-foreground"
+                                : "flex max-w-[88%] flex-col gap-4"
+                            )}
+                          >
+                            {isUser ? (
+                              message.parts.map((part, index) =>
+                                part.type === "text"
+                                  ? renderUserMessage(part.text, `${message.id}-${index}`)
+                                  : null
+                              )
+                            ) : (
+                              <>
+                                <Streamdown isAnimating={isBusy}>
+                                  {message.parts
+                                    .filter((part) => part.type === "text")
+                                    .map((part) => part.text)
+                                    .join("")}
+                                </Streamdown>
+                                {message.parts.map((part) => {
+                                  if (part.type !== "tool-verifyKnowledgeBase") {
+                                    return null
+                                  }
+
+                                  if (part.state === "input-available") {
+                                    return (
+                                      <div
+                                        key={part.toolCallId}
+                                        className="order-first mt-4 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 text-sm"
+                                      >
+                                        <div className="flex items-center gap-2 font-medium">
+                                          <Database className="size-4 text-muted-foreground" aria-hidden="true" />
+                                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                                          正在进行知识库核验
+                                        </div>
+                                        <p className="text-muted-foreground">
+                                          核验内容：{part.input.question}
+                                        </p>
+                                      </div>
+                                    )
+                                  }
+
+                                  if (part.state === "output-available") {
+                                    const rawOutput: unknown = part.output
+                                    const output =
+                                      typeof rawOutput === "string"
+                                        ? rawOutput
+                                        : typeof rawOutput === "object" &&
+                                            rawOutput !== null &&
+                                            "answer" in rawOutput
+                                          ? String(rawOutput.answer)
+                                          : JSON.stringify(rawOutput)
+
+                                    return (
+                                      <div
+                                        key={part.toolCallId}
+                                        className="order-first mt-4 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 text-sm"
+                                      >
+                                        <div className="flex items-center gap-2 font-medium">
+                                          <AlertTriangle className="size-4 text-destructive" aria-hidden="true" />
+                                          知识库验证结果
+                                        </div>
+                                        <p className="text-muted-foreground">
+                                          核验内容：{part.input.question}
+                                        </p>
+                                        <Streamdown>{output}</Streamdown>
+                                      </div>
+                                    )
+                                  }
+
+                                  if (part.state === "output-error") {
+                                    return (
+                                      <p key={part.toolCallId} className="order-first mt-4 text-sm text-destructive">
+                                        知识库核验失败：{part.errorText}
+                                      </p>
+                                    )
+                                  }
+
+                                  return null
+                                })}
+                                {message.parts.map((part) => {
+                            if (part.type !== "tool-proposeArticleOutline") {
                               return null
                             }
 
-                            if (part.state === "input-available") {
-                              return (
-                                <div
-                                  key={part.toolCallId}
-                                  className="order-first mt-4 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 text-sm"
-                                >
-                                  <div className="flex items-center gap-2 font-medium">
-                                    <Database className="size-4 text-muted-foreground" aria-hidden="true" />
-                                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                                    正在进行知识库核验
-                                  </div>
-                                  <p className="text-muted-foreground">
-                                    核验内容：{part.input.question}
-                                  </p>
-                                </div>
-                              )
-                            }
-
-                            if (part.state === "output-available") {
-                              const rawOutput: unknown = part.output
-                              const output =
-                                typeof rawOutput === "string"
-                                  ? rawOutput
-                                  : typeof rawOutput === "object" &&
-                                      rawOutput !== null &&
-                                      "answer" in rawOutput
-                                    ? String(rawOutput.answer)
-                                    : JSON.stringify(rawOutput)
-
-                              return (
-                                <div
-                                  key={part.toolCallId}
-                                  className="order-first mt-4 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 text-sm"
-                                >
-                                  <div className="flex items-center gap-2 font-medium">
-                                    <AlertTriangle className="size-4 text-destructive" aria-hidden="true" />
-                                    知识库验证结果
-                                  </div>
-                                  <p className="text-muted-foreground">
-                                    核验内容：{part.input.question}
-                                  </p>
-                                  <Streamdown>{output}</Streamdown>
-                                </div>
-                              )
-                            }
-
-                            if (part.state === "output-error") {
-                              return (
-                                <p key={part.toolCallId} className="order-first mt-4 text-sm text-destructive">
-                                  知识库核验失败：{part.errorText}
-                                </p>
-                              )
-                            }
-
-                            return null
-                          })}
-                          {message.parts.map((part) => {
-                            if (
-                              part.type !== "tool-proposeArticleOutline" ||
-                              part.state !== "input-available"
-                            ) {
+                            if (part.state !== "input-available") {
                               return null
                             }
 
-                            const outline = outlineSchema.parse(part.input)
+                            const toolPart = part as typeof part & {
+                              rawInput?: unknown
+                            }
+                            const parsedOutline = parseOutlineInput(
+                              toolPart.input ?? toolPart.rawInput
+                            )
+
+                            if (!parsedOutline.success) {
+                              return null
+                            }
 
                             return (
                               <ArticleOutlineEditor
                                 key={part.toolCallId}
-                                outline={outline}
-                                onConfirm={(editedOutline: ArticleOutline) =>
-                                  addToolOutput({
-                                    tool: "proposeArticleOutline",
-                                    toolCallId: part.toolCallId,
-                                    output: editedOutline,
-                                  })
-                                }
-                              />
-                            )
-                          })}
-                        </>
-                      )}
-                    </div>
-                    {isUser && (
-                      <Avatar size="sm" aria-hidden="true">
-                        <AvatarFallback>
-                          <User />
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                  </div>
+                                outline={parsedOutline.data}
+                                      onConfirm={(editedOutline: ArticleOutline) =>
+                                        addToolOutput({
+                                          tool: "proposeArticleOutline",
+                                          toolCallId: part.toolCallId,
+                                          output: editedOutline,
+                                        })
+                                      }
+                                    />
+                                  )
+                                })}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </MessageScrollerItem>
+                    )
+                  })
+                )}
+
+                {isBusy && (
+                  <MessageScrollerItem className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Agent 正在思考…
                   </MessageScrollerItem>
-                )
-              })
-            )}
+                )}
 
-            {isBusy && (
-              <MessageScrollerItem className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                Agent 正在思考…
-              </MessageScrollerItem>
-            )}
-
-            {error && (
-              <MessageScrollerItem className="text-sm text-destructive">
-                请求失败：{error.message || "请稍后重试"}
-              </MessageScrollerItem>
-            )}
+                {error && (
+                  <MessageScrollerItem className="text-sm text-destructive">
+                    请求失败：{error.message || "请稍后重试"}
+                  </MessageScrollerItem>
+                )}
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton />
           </MessageScroller>
         </MessageScrollerProvider>
-      </CardContent>
+      </div>
 
-      <Separator />
-      <CardFooter className="block p-3">
-        <div className="mb-2 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={isBusy}
-            onClick={handleSuggestedPrompt}
-          >
-            请帮我写一篇公文
-          </Button>
-        </div>
+      <footer className="shrink-0 px-8 pb-6 pt-3">
+        {messages.length === 0 && (
+          <div className="mx-auto mb-3 flex w-full max-w-[1000px] flex-wrap justify-center gap-2">
+            {["请帮我写一篇公文：关于推动人工智能发展的建议"].map((prompt) => (
+              <Button
+                key={prompt}
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => handleSuggestedPrompt(prompt)}
+              >
+                {prompt}
+              </Button>
+            ))}
+          </div>
+        )}
+
         {selectedReference && (
-          <div className="mb-2 flex items-start gap-2 rounded-lg border bg-muted/50 p-2.5 text-sm">
+          <div className="mx-auto mb-2 flex w-full max-w-[1000px] items-start gap-2 rounded-lg border bg-muted/50 p-2.5 text-sm">
             <MessageSquareQuote className="mt-0.5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <p className="font-medium">已选中的文档内容</p>
@@ -447,25 +455,26 @@ export function AgentChat() {
             </Button>
           </div>
         )}
-        <form onSubmit={handleSubmit}>
-          <InputGroup className="min-h-10">
+
+        <form className="mx-auto w-full max-w-[1000px]" onSubmit={handleSubmit}>
+          <InputGroup className="min-h-12 rounded-2xl bg-background shadow-sm">
             <InputGroupTextarea
-            ref={inputRef}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }}
-            placeholder="输入消息，按 Enter 发送…"
-            aria-label="输入消息"
-            rows={2}
-            disabled={isBusy}
-            className="max-h-32 min-h-10 resize-none"
+              ref={inputRef}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }}
+              placeholder="输入消息…"
+              aria-label="输入消息"
+              rows={2}
+              disabled={isBusy}
+              className="max-h-32 min-h-12 resize-none px-4 py-3"
             />
-            <InputGroupAddon align="inline-end">
+            <InputGroupAddon align="inline-end" className="pr-3">
               <InputGroupButton
                 type="submit"
                 size="icon-sm"
@@ -477,12 +486,10 @@ export function AgentChat() {
             </InputGroupAddon>
           </InputGroup>
         </form>
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mx-auto mt-2 w-full max-w-[1000px] text-center text-xs text-muted-foreground">
           Enter 发送 · Shift + Enter 换行
         </p>
-      </CardFooter>
-    </Card>
+      </footer>
+    </div>
   )
 }
-
-

@@ -14,6 +14,7 @@ import {
   Subscript,
   Superscript,
   Undo2,
+  X,
 } from 'lucide-react';
 import { importDocx, DocxExportPlugin } from '@platejs/docx-io';
 import { MarkdownPlugin } from '@platejs/markdown';
@@ -34,7 +35,7 @@ import {
   type LocalEdit,
 } from '@/components/editor/document-editor-context';
 
-export function PlateEditor() {
+export function PlateEditor({ onClose }: { onClose?: () => void }) {
   const {
     appendToPrompt,
     registerDocumentReader,
@@ -211,6 +212,16 @@ export function PlateEditor() {
             {isExporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <FileDown data-icon="inline-start" />}
             导出 DOCX
           </Button>
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onClose}
+              aria-label="关闭文档编辑器"
+            >
+              <X />
+            </Button>
+          )}
         </div>
       </div>
       <Plate editor={editor}>
@@ -219,7 +230,7 @@ export function PlateEditor() {
           <SelectionFloatingToolbar onAdd={handleAddSelectionToPrompt} />
         )}
         <EditorContainer
-          className="min-h-0 flex-1 bg-muted/30 py-8"
+          className="min-h-0 flex-1 bg-muted/30 px-8 py-8"
           onScroll={() => setShowSelectionToolbar(false)}
           onMouseUp={() => setShowSelectionToolbar(true)}
         >
@@ -235,7 +246,7 @@ export function PlateEditor() {
               </Button>
             </div>
           )}
-          <div className="mx-auto min-h-full w-[min(100%-2rem,820px)] rounded-sm bg-background shadow-sm ring-1 ring-border/60">
+          <div className="min-h-full w-full rounded-sm bg-background shadow-sm ring-1 ring-border/60">
             <Editor className="py-8" variant="fullWidth" placeholder="开始输入文档内容…" />
           </div>
         </EditorContainer>
@@ -328,5 +339,3 @@ const value = normalizeStaticValue([
     type: 'p',
   },
 ]);
-
-

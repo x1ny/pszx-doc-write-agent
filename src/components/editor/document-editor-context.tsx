@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useRef,
+  useState,
   type ReactNode,
 } from "react"
 
@@ -35,6 +36,10 @@ type LocalEditApplier = (edit: LocalEdit) => {
 }
 
 type DocumentEditorContextValue = {
+  hasDocument: boolean
+  isEditorOpen: boolean
+  revealEditor: () => void
+  closeEditor: () => void
   registerMarkdownWriter: (writer: MarkdownWriter) => () => void
   writeMarkdown: (markdown: string) => void
   registerPromptAppender: (appender: PromptAppender) => () => void
@@ -50,6 +55,8 @@ const DocumentEditorContext = createContext<
 >(undefined)
 
 export function DocumentEditorProvider({ children }: { children: ReactNode }) {
+  const [hasDocument, setHasDocument] = useState(false)
+  const [isEditorOpen, setIsEditorOpen] = useState(false)
   const markdownWriterRef = useRef<MarkdownWriter | null>(null)
   const promptAppenderRef = useRef<PromptAppender | null>(null)
   const documentReaderRef = useRef<DocumentReader | null>(null)
@@ -67,6 +74,15 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
 
   const writeMarkdown = useCallback((markdown: string) => {
     markdownWriterRef.current?.(markdown)
+  }, [])
+
+  const revealEditor = useCallback(() => {
+    setHasDocument(true)
+    setIsEditorOpen(true)
+  }, [])
+
+  const closeEditor = useCallback(() => {
+    setIsEditorOpen(false)
   }, [])
 
   const registerPromptAppender = useCallback((appender: PromptAppender) => {
@@ -119,6 +135,10 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
   return (
     <DocumentEditorContext.Provider
       value={{
+        hasDocument,
+        isEditorOpen,
+        revealEditor,
+        closeEditor,
         registerMarkdownWriter,
         writeMarkdown,
         registerPromptAppender,
@@ -145,5 +165,4 @@ export function useDocumentEditor() {
 
   return context
 }
-
 

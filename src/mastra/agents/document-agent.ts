@@ -4,6 +4,7 @@ import { Agent } from '@mastra/core/agent';
 import {
   getCurrentTime,
   proposeArticleOutline,
+  simulateLeaderStyleAnalysis,
   verifyKnowledgeBase,
 } from '../tools/document-tools';
 
@@ -33,10 +34,16 @@ export const documentAgent = new Agent({
 - 用户要求创作较长文章时，必须先调用 proposeArticleOutline 生成结构化大纲，并等待用户确认或编辑大纲，不能直接生成全文。
 - 只有在文章内容完整生成后，才能调用 writeMarkdownToPlate 将完整 Markdown 写入编辑器，不要传入大纲或未完成内容。
 - 用户要求查找、修改、润色当前文档时，必须先调用 getDocumentSnapshot；applyLocalEdit 的 expectedText 必须来自最新快照，且只做局部、可验证的替换。
+- 用户要求将当前整篇公文改成某位领导或作者的写作风格时，必须先调用 getDocumentSnapshot，再调用 simulateLeaderStyleAnalysis；改写时优先使用快照中的完整 markdown 字段，该工具返回的风格总结是后续改写的唯一风格依据。随后使用真实模型按该风格改写全文，调用 writeMarkdownToPlate 写入编辑器，并在最终回复中说明风格总结和主要修改内容。
 - 如果用户消息中包含 document_selection 标签，先理解其中引用的文档内容，再处理用户的要求。
 - 回答保持清晰、克制，除非用户要求，否则不要重复工具调用过程。`,
   model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
-  tools: { verifyKnowledgeBase, getCurrentTime, proposeArticleOutline },
+  tools: {
+    verifyKnowledgeBase,
+    getCurrentTime,
+    proposeArticleOutline,
+    simulateLeaderStyleAnalysis,
+  },
   hooks: {
     beforeToolCall: ({ toolName, input }) => {
       console.log(`\n[ReAct][beforeToolCall] ${toolName}`);

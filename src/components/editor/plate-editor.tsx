@@ -91,6 +91,9 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
     const unregisterReader = registerDocumentReader(() => ({
       blocks: collectBlocks(editor.children as Descendant[]),
+      markdown: editor
+        .getApi(MarkdownPlugin)
+        .markdown.serialize({ value: editor.children as Descendant[] }),
     }));
 
     const unregisterApplier = registerLocalEditApplier((edit: LocalEdit) => {

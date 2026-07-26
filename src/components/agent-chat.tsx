@@ -1,7 +1,6 @@
 "use client"
 
 import { DefaultChatTransport } from "ai"
-import { lastAssistantMessageIsCompleteWithToolCalls } from "ai"
 import { useChat } from "@ai-sdk/react"
 import {
   AlertTriangle,
@@ -38,7 +37,18 @@ const clientToolPartTypes = new Set([
   "tool-writeMarkdownToPlate",
   "tool-getDocumentSnapshot",
   "tool-applyLocalEdit",
+  "tool-simulateLeaderStyleAnalysis",
 ])
+type AgentToolPart = Extract<
+  AssistantAgentUIMessage["parts"][number],
+  { type: `tool-${string}` }
+>
+
+function isAgentToolPart(
+  part: AssistantAgentUIMessage["parts"][number]
+): part is AgentToolPart {
+  return part.type.startsWith("tool-")
+}
 
 function parseOutlineInput(input: unknown) {
   if (typeof input === "string") {
@@ -50,42 +60,6 @@ function parseOutlineInput(input: unknown) {
   }
 
   return outlineSchema.safeParse(input)
-}
-
-function shouldAutomaticallyContinue({
-  messages,
-}: {
-  messages: AssistantAgentUIMessage[]
-}) {
-  const lastMessage = messages.at(-1)
-
-  if (
-    lastMessage?.parts.some(
-      (part) => part.type === "data-tool-call-suspended"
-    )
-  ) {
-    return false
-  }
-
-  const lastStepStartIndex =
-    lastMessage?.parts.reduce(
-      (lastIndex, part, index) =>
-        part.type === "step-start" ? index : lastIndex,
-      -1
-    ) ?? -1
-  const lastStepToolParts =
-    lastMessage?.parts
-      .slice(lastStepStartIndex + 1)
-      .filter((part) => part.type.startsWith("tool-")) ?? []
-
-  if (
-    lastStepToolParts.length === 0 ||
-    !lastStepToolParts.every((part) => clientToolPartTypes.has(part.type))
-  ) {
-    return false
-  }
-
-  return lastAssistantMessageIsCompleteWithToolCalls({ messages })
 }
 
 function renderUserMessage(text: string, key: string) {
@@ -114,6 +88,8 @@ export function AgentChat() {
   const wasBusyRef = useRef(false)
   const handledMarkdownToolsRef = useRef(new Set<string>())
   const streamedMarkdownRef = useRef(new Map<string, string>())
+  const handledStyleAnalysisToolsRef = useRef(new Set<string>())
+  const autoContinuedToolCallsRef = useRef(new Set<string>())
   const resumedOutlineToolsRef = useRef(new Set<string>())
   const [resumedOutlineToolIds, setResumedOutlineToolIds] = useState<Set<string>>(
     () => new Set()
@@ -127,6 +103,52 @@ export function AgentChat() {
     revealEditor,
     writeMarkdown,
   } = useDocumentEditor()
+
+  function shouldAutomaticallyContinue({
+    messages,
+  }: {
+    messages: AssistantAgentUIMessage[]
+  }) {
+    const lastMessage = messages.at(-1)
+
+    if (
+      !lastMessage ||
+      lastMessage.role !== "assistant" ||
+      lastMessage.parts.some(
+        (part) => part.type === "data-tool-call-suspended"
+      )
+    ) {
+      return false
+    }
+
+    const toolParts = lastMessage.parts.filter(isAgentToolPart)
+    const clientToolParts = toolParts.filter((part) =>
+      clientToolPartTypes.has(part.type)
+    )
+    const pendingClientToolParts = clientToolParts.filter(
+      (part) =>
+        part.state !== "output-available" && part.state !== "output-error"
+    )
+    const uncontinuedClientToolParts = clientToolParts.filter(
+      (part) => !autoContinuedToolCallsRef.current.has(part.toolCallId)
+    )
+
+    if (
+      toolParts.length === 0 ||
+      clientToolParts.length === 0 ||
+      pendingClientToolParts.length > 0 ||
+      uncontinuedClientToolParts.length === 0
+    ) {
+      return false
+    }
+
+    for (const part of uncontinuedClientToolParts) {
+      autoContinuedToolCallsRef.current.add(part.toolCallId)
+    }
+
+    return true
+  }
+
   const { messages, sendMessage, addToolOutput, status, error } =
     useChat<AssistantAgentUIMessage>({
       transport,
@@ -195,6 +217,39 @@ export function AgentChat() {
       }
     }
   }, [addToolOutput, messages, revealEditor, writeMarkdown])
+
+  useEffect(() => {
+    for (const message of messages) {
+      for (const part of message.parts) {
+        if (
+          part.type !== "data-style-rewrite-result" ||
+          handledStyleAnalysisToolsRef.current.has(part.data.toolCallId)
+        ) {
+          continue
+        }
+
+        const toolCall = messages
+          .flatMap((currentMessage) => currentMessage.parts)
+          .find(
+            (candidate) =>
+              candidate.type === "tool-simulateLeaderStyleAnalysis" &&
+              candidate.toolCallId === part.data.toolCallId &&
+              candidate.state === "input-available"
+          )
+
+        if (!toolCall) {
+          continue
+        }
+
+        handledStyleAnalysisToolsRef.current.add(part.data.toolCallId)
+        addToolOutput({
+          tool: "simulateLeaderStyleAnalysis",
+          toolCallId: part.data.toolCallId,
+          output: part.data.output,
+        })
+      }
+    }
+  }, [addToolOutput, messages])
 
   const handledDocumentToolsRef = useRef(new Set<string>())
 
@@ -403,6 +458,35 @@ export function AgentChat() {
                                     .join("")}
                                 </Streamdown>
                                 {message.parts.map((part) => {
+                                  if (part.type === "data-style-rewrite-progress") {
+                                    const data = part.data
+                                    const isSearching = data.phase === "searching"
+                                    const isFound = data.phase === "found"
+
+                                    return (
+                                      <div
+                                        key={part.id ?? `${data.phase}-${data.leaderName}`}
+                                        className="order-first mt-4 flex items-center gap-2 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground"
+                                      >
+                                        {isFound ? (
+                                          <Database className="size-4 text-primary" aria-hidden="true" />
+                                        ) : (
+                                          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                                        )}
+                                        <span>{data.message}</span>
+                                        {isSearching && (
+                                          <span className="text-xs text-muted-foreground/70">
+                                            模拟检索
+                                          </span>
+                                        )}
+                                      </div>
+                                    )
+                                  }
+
+                                  if (part.type === "data-style-rewrite-result") {
+                                    return null
+                                  }
+
                                   if (part.type !== "tool-verifyKnowledgeBase") {
                                     return null
                                   }

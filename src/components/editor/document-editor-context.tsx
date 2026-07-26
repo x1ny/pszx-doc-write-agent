@@ -20,6 +20,7 @@ export type DocumentBlock = {
 
 export type DocumentSnapshot = {
   blocks: DocumentBlock[]
+  markdown?: string
 }
 
 export type LocalEdit = {
@@ -165,4 +166,3 @@ export function useDocumentEditor() {
 
   return context
 }
-

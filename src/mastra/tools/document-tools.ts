@@ -18,6 +18,7 @@ const documentBlockSchema = z.object({
 
 const documentSnapshotSchema = z.object({
   blocks: z.array(documentBlockSchema),
+  markdown: z.string().optional(),
 });
 
 const localEditSchema = z.object({
@@ -25,6 +26,104 @@ const localEditSchema = z.object({
   expectedText: z.string().min(1),
   targetText: z.string().min(1),
   replacement: z.string().min(1),
+});
+
+const leaderStyleOutputSchema = z.object({
+  leaderName: z.string(),
+  materialCount: z.number(),
+  styleSummary: z.string(),
+  styleFeatures: z.array(z.string()),
+  rewriteGuidance: z.array(z.string()),
+});
+
+const fixedLeaderStyleSummary =
+  '整体呈现用词精炼、结构严谨、数据全面、重点突出、责任清晰的写作特点。文章通常先交代背景和目标，再围绕问题分层提出措施，强调政策落地、时间节点、责任分工和结果导向，语言正式克制，少用空泛表述。';
+
+const fixedLeaderStyleFeatures = [
+  '用词精炼，句式简洁，避免重复铺陈和过度修饰。',
+  '结构严谨，按照背景分析、问题研判、工作任务、保障措施逐层展开。',
+  '数据全面，优先使用时间、数量、比例、目标和完成节点增强说服力。',
+  '措施具体，明确重点任务、责任主体、实施路径和预期成效。',
+  '表达正式克制，突出问题导向、结果导向和政策执行力度。',
+];
+
+const fixedRewriteGuidance = [
+  '压缩空泛的背景铺垫，将核心判断前置。',
+  '把原则性表述改写为可执行的任务、机制和保障措施。',
+  '补充或保留必要的数据、时间节点、责任分工和预期目标。',
+  '统一标题层级和段落节奏，增强全文的公文规范性。',
+];
+
+async function waitForStyleSimulation(milliseconds: number) {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export const simulateLeaderStyleAnalysis = createTool({
+  id: 'simulateLeaderStyleAnalysis',
+  description:
+    '模拟检索指定人物的历史材料并总结其写作风格。人物名称可以是任意文本；材料检索和分析过程为模拟，最终返回固定的写作风格供后续真实改写使用。',
+  inputSchema: z.object({
+    leaderName: z.string().min(1).describe('用户希望模仿的领导或作者名称'),
+  }),
+  outputSchema: leaderStyleOutputSchema,
+  execute: async ({ leaderName }, context) => {
+    const normalizedLeaderName = leaderName.trim();
+    const materialCount = 35;
+    const emitProgress = async (
+      phase: 'searching' | 'found' | 'summarizing',
+      message: string
+    ) => {
+      await context.writer?.custom({
+        type: 'data-style-rewrite-progress',
+        data: {
+          state: 'data-style-rewrite-progress',
+          phase,
+          leaderName: normalizedLeaderName,
+          materialCount,
+          message,
+        },
+        transient: true,
+      });
+    };
+
+    await emitProgress(
+      'searching',
+      `正在查找${normalizedLeaderName}的历史材料...`
+    );
+    await waitForStyleSimulation(450);
+
+    await emitProgress(
+      'found',
+      `已在系统中找到${normalizedLeaderName}的${materialCount}篇材料`
+    );
+    await waitForStyleSimulation(650);
+
+    await emitProgress('summarizing', '正在总结写作风格...');
+    await waitForStyleSimulation(650);
+
+    const output = {
+      leaderName: normalizedLeaderName,
+      materialCount,
+      styleSummary: fixedLeaderStyleSummary,
+      styleFeatures: fixedLeaderStyleFeatures,
+      rewriteGuidance: fixedRewriteGuidance,
+    };
+
+    const toolCallId = context.agent?.toolCallId;
+    if (toolCallId) {
+      await context.writer?.custom({
+        type: 'data-style-rewrite-result',
+        data: {
+          state: 'data-style-rewrite-result',
+          toolCallId,
+          output,
+        },
+        transient: true,
+      });
+    }
+
+    return output;
+  },
 });
 
 export const proposeArticleOutline = createTool({
@@ -98,7 +197,8 @@ export const writeMarkdownToPlate = createTool({
 
 export const getDocumentSnapshot = createTool({
   id: 'getDocumentSnapshot',
-  description: '读取当前 Plate 编辑器的文档结构和正文。修改或润色前必须先调用。',
+  description:
+    '读取当前 Plate 编辑器的完整 Markdown 正文和文档结构。修改或润色前必须先调用。',
   inputSchema: z.object({
     query: z.string().optional().describe('可选的检索关键词'),
   }),
@@ -193,6 +293,7 @@ export const clientTools = {
 
 export const serverTools = {
   proposeArticleOutline,
+  simulateLeaderStyleAnalysis,
   verifyKnowledgeBase,
   getCurrentTime,
 };

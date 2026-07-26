@@ -11,13 +11,23 @@ type AssistantAgentUITools = {
     input: { description: string };
     output: ArticleOutline;
   };
+  simulateLeaderStyleAnalysis: {
+    input: { leaderName: string };
+    output: {
+      leaderName: string;
+      materialCount: number;
+      styleSummary: string;
+      styleFeatures: string[];
+      rewriteGuidance: string[];
+    };
+  };
   writeMarkdownToPlate: {
     input: { markdown: string };
     output: { success: boolean };
   };
   getDocumentSnapshot: {
     input: { query?: string };
-    output: { blocks: DocumentBlock[] };
+    output: { blocks: DocumentBlock[]; markdown?: string };
   };
   applyLocalEdit: {
     input: LocalEdit;
@@ -46,6 +56,24 @@ type AssistantAgentUIData = {
     toolName: string;
     suspendPayload: { outline: ArticleOutline };
     resumeSchema?: unknown;
+  };
+  "style-rewrite-progress": {
+    state: "data-style-rewrite-progress";
+    phase: "searching" | "found" | "summarizing";
+    leaderName: string;
+    materialCount: number;
+    message: string;
+  };
+  "style-rewrite-result": {
+    state: "data-style-rewrite-result";
+    toolCallId: string;
+    output: {
+      leaderName: string;
+      materialCount: number;
+      styleSummary: string;
+      styleFeatures: string[];
+      rewriteGuidance: string[];
+    };
   };
 };
 

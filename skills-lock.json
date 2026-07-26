@@ -1,11 +1,23 @@
 {
   "version": 1,
   "skills": {
+    "ai-sdk": {
+      "source": "vercel/ai",
+      "sourceType": "github",
+      "skillPath": "skills/use-ai-sdk/SKILL.md",
+      "computedHash": "dfce60b0f2749991e000123526e298d5ede1c8353d837e71886fb3c8e5f8b730"
+    },
     "mastra": {
       "source": "mastra-ai/skills",
       "sourceType": "github",
       "skillPath": "skills/mastra/SKILL.md",
       "computedHash": "517cfc6261f08fcd16c8f0ee64bf7a5b70d0d69acb723cbec4179678b0462f18"
+    },
+    "shadcn": {
+      "source": "shadcn/ui",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "f99ef49d9909d380ca683ceb8dc8c25775c20ee38140112c394e037d8c11ee18"
     }
   }
 }

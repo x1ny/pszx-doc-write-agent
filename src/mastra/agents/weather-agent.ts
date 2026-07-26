@@ -25,5 +25,26 @@ Your primary function is to help users get weather details for specific location
 Use the weatherTool to fetch current weather data.`,
   model: deepseek(process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash'),
   tools: { weatherTool },
-  memory: new Memory(),
+  memory: new Memory({
+    options: {
+      workingMemory: {
+        enabled: true,
+        scope: 'resource',
+        template: `# Conversation Memory
+
+## User Profile
+
+- Name:
+- Location:
+- Preferred Units:
+
+## Conversation Context
+
+- Current Topic:
+- Relevant Preferences:
+- Open Questions:
+`,
+      },
+    },
+  }),
 });

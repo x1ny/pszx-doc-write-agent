@@ -21,19 +21,23 @@ import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/componen
 
 function Chat() {
   const [input, setInput] = useState<string>('')
+  const [threadId] = useState(() => crypto.randomUUID())
   const { messages, setMessages, sendMessage, status } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/chat' }),
+    transport: new DefaultChatTransport({
+      api: '/api/chat',
+      body: { threadId },
+    }),
   })
 
   useEffect(() => {
     const fetchMessages = async () => {
-      const res = await fetch('/api/chat')
+      const res = await fetch(`/api/chat?threadId=${encodeURIComponent(threadId)}`)
       const data = await res.json()
       setMessages([...data])
     }
 
     fetchMessages()
-  }, [setMessages])
+  }, [setMessages, threadId])
 
   const handleSubmit = async () => {
     if (!input.trim()) return

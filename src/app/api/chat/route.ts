@@ -5,11 +5,11 @@ import { NextResponse } from 'next/server'
 
 import { mastra } from '@/mastra'
 
-const THREAD_ID = 'example-user-id'
 const RESOURCE_ID = 'weather-chat'
 
 export async function POST(req: Request) {
-  const params = await req.json()
+  const { threadId, ...params } = await req.json()
+  const currentThreadId = threadId || crypto.randomUUID()
 
   const stream = await handleChatStream({
     mastra,
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
       ...params,
       memory: {
         ...params.memory,
-        thread: THREAD_ID,
+        thread: currentThreadId,
         resource: RESOURCE_ID,
       },
     },
@@ -29,14 +29,20 @@ export async function POST(req: Request) {
   })
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const memory = await mastra.getAgentById('weather-agent').getMemory()
+
+  const threadId = new URL(req.url).searchParams.get('threadId')
+
+  if (!threadId) {
+    return NextResponse.json([])
+  }
 
   let response = null
 
   try {
     response = await memory?.recall({
-      threadId: THREAD_ID,
+      threadId,
       resourceId: RESOURCE_ID,
     })
   } catch {

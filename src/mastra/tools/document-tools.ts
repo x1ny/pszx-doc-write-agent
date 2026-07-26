@@ -1,5 +1,5 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
-import { generateText } from 'ai';
+import { generateText, Output } from 'ai';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
@@ -29,9 +29,62 @@ const localEditSchema = z.object({
 
 export const proposeArticleOutline = createTool({
   id: 'proposeArticleOutline',
-  description: '为较长公文先生成结构化文章大纲，并等待用户确认后再写全文。',
-  inputSchema: outlineSchema,
+  description:
+    '为较长公文生成结构化文章大纲，展示给用户编辑并等待用户提交编辑后的大纲；在用户提交前不要生成全文。',
+  onInputStart: ({ toolCallId }) => {
+    console.log(`\n[ReAct][tool-input-start] proposeArticleOutline (${toolCallId})`);
+  },
+  onInputDelta: ({ inputTextDelta }) => {
+    console.log('[ReAct][tool-input-delta] proposeArticleOutline', inputTextDelta);
+  },
+  onInputAvailable: ({ input, toolCallId }) => {
+    console.log(`\n[ReAct][tool-input-available] proposeArticleOutline (${toolCallId})`);
+    console.log('[ReAct][input]', JSON.stringify(input, null, 2));
+  },
+  onOutput: ({ output, toolName }) => {
+    console.log(`\n[ReAct][tool-output] ${toolName}`);
+    console.log('[ReAct][output]', JSON.stringify(output, null, 2));
+  },
+  inputSchema: z.object({
+    description: z.string().min(1).describe('用户希望创作的公文主题、目标和重点要求'),
+  }),
   outputSchema: outlineSchema,
+  suspendSchema: z.object({
+    outline: outlineSchema,
+  }),
+  resumeSchema: z.object({
+    outline: outlineSchema,
+  }),
+  execute: async ({ description }, context) => {
+    const { resumeData, suspend } = context.agent ?? {};
+
+    if (resumeData?.outline) {
+      console.log('\n[ReAct][outline-resumed] proposeArticleOutline');
+      console.log('[ReAct][edited-outline]', JSON.stringify(resumeData.outline, null, 2));
+      return resumeData.outline;
+    }
+
+    const { output } = await generateText({
+      model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
+      system:
+        '你是公文写作规划助手。请根据用户需求生成结构清晰、内容具体的公文大纲。只输出符合给定结构的大纲对象，不要输出 Markdown、解释文字或代码块。大纲应包含标题、摘要和多个章节，每个章节包含写作目的和关键要点。',
+      prompt: description,
+      output: Output.object({
+        name: 'ArticleOutline',
+        description: '结构化公文文章大纲',
+        schema: outlineSchema,
+      }),
+      providerOptions: {
+        deepseek: {
+          thinking: { type: 'disabled' },
+        },
+      },
+    });
+
+    console.log('\n[ReAct][outline-suspend] proposeArticleOutline');
+    console.log('[ReAct][outline]', JSON.stringify(output, null, 2));
+    await suspend?.({ outline: output });
+  },
 });
 
 export const writeMarkdownToPlate = createTool({
@@ -133,13 +186,13 @@ export const getCurrentTime = createTool({
 });
 
 export const clientTools = {
-  proposeArticleOutline,
   writeMarkdownToPlate,
   getDocumentSnapshot,
   applyLocalEdit,
 };
 
 export const serverTools = {
+  proposeArticleOutline,
   verifyKnowledgeBase,
   getCurrentTime,
 };

@@ -1,12 +1,24 @@
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { Agent } from '@mastra/core/agent';
 
-import { getCurrentTime, verifyKnowledgeBase } from '../tools/document-tools';
+import {
+  getCurrentTime,
+  proposeArticleOutline,
+  verifyKnowledgeBase,
+} from '../tools/document-tools';
 
 const deepseek = createDeepSeek({
   apiKey: process.env.DEEPSEEK_API_KEY ?? '',
   baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
 });
+
+function formatDebugValue(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
 
 export const documentAgent = new Agent({
   id: 'document-agent',
@@ -24,5 +36,21 @@ export const documentAgent = new Agent({
 - 如果用户消息中包含 document_selection 标签，先理解其中引用的文档内容，再处理用户的要求。
 - 回答保持清晰、克制，除非用户要求，否则不要重复工具调用过程。`,
   model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
-  tools: { verifyKnowledgeBase, getCurrentTime },
+  tools: { verifyKnowledgeBase, getCurrentTime, proposeArticleOutline },
+  hooks: {
+    beforeToolCall: ({ toolName, input }) => {
+      console.log(`\n[ReAct][beforeToolCall] ${toolName}`);
+      console.log('[ReAct][input]', formatDebugValue(input));
+    },
+    afterToolCall: ({ toolName, output, error }) => {
+      if (error) {
+        console.error(`\n[ReAct][afterToolCall][error] ${toolName}`);
+        console.error(formatDebugValue(error));
+        return;
+      }
+
+      console.log(`\n[ReAct][afterToolCall] ${toolName}`);
+      console.log('[ReAct][output]', formatDebugValue(output));
+    },
+  },
 });

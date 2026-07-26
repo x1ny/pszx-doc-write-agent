@@ -34,6 +34,11 @@ import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
 const transport = new DefaultChatTransport({ api: "/api/chat" })
 
 const selectionContextPattern = /<document_selection>([\s\S]*?)<\/document_selection>\s*/
+const clientToolPartTypes = new Set([
+  "tool-writeMarkdownToPlate",
+  "tool-getDocumentSnapshot",
+  "tool-applyLocalEdit",
+])
 
 function parseOutlineInput(input: unknown) {
   if (typeof input === "string") {
@@ -45,6 +50,42 @@ function parseOutlineInput(input: unknown) {
   }
 
   return outlineSchema.safeParse(input)
+}
+
+function shouldAutomaticallyContinue({
+  messages,
+}: {
+  messages: AssistantAgentUIMessage[]
+}) {
+  const lastMessage = messages.at(-1)
+
+  if (
+    lastMessage?.parts.some(
+      (part) => part.type === "data-tool-call-suspended"
+    )
+  ) {
+    return false
+  }
+
+  const lastStepStartIndex =
+    lastMessage?.parts.reduce(
+      (lastIndex, part, index) =>
+        part.type === "step-start" ? index : lastIndex,
+      -1
+    ) ?? -1
+  const lastStepToolParts =
+    lastMessage?.parts
+      .slice(lastStepStartIndex + 1)
+      .filter((part) => part.type.startsWith("tool-")) ?? []
+
+  if (
+    lastStepToolParts.length === 0 ||
+    !lastStepToolParts.every((part) => clientToolPartTypes.has(part.type))
+  ) {
+    return false
+  }
+
+  return lastAssistantMessageIsCompleteWithToolCalls({ messages })
 }
 
 function renderUserMessage(text: string, key: string) {
@@ -73,6 +114,10 @@ export function AgentChat() {
   const wasBusyRef = useRef(false)
   const handledMarkdownToolsRef = useRef(new Set<string>())
   const streamedMarkdownRef = useRef(new Map<string, string>())
+  const resumedOutlineToolsRef = useRef(new Set<string>())
+  const [resumedOutlineToolIds, setResumedOutlineToolIds] = useState<Set<string>>(
+    () => new Set()
+  )
   const {
     applyLocalEdit,
     hasDocument,
@@ -85,7 +130,7 @@ export function AgentChat() {
   const { messages, sendMessage, addToolOutput, status, error } =
     useChat<AssistantAgentUIMessage>({
       transport,
-      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      sendAutomaticallyWhen: shouldAutomaticallyContinue,
     })
   const isBusy = status === "submitted" || status === "streaming"
 
@@ -419,36 +464,55 @@ export function AgentChat() {
                                   return null
                                 })}
                                 {message.parts.map((part) => {
-                            if (part.type !== "tool-proposeArticleOutline") {
-                              return null
-                            }
+                                  if (part.type !== "data-tool-call-suspended") {
+                                    return null
+                                  }
 
-                            if (part.state !== "input-available") {
-                              return null
-                            }
+                                  const data = part.data
 
-                            const toolPart = part as typeof part & {
-                              rawInput?: unknown
-                            }
-                            const parsedOutline = parseOutlineInput(
-                              toolPart.input ?? toolPart.rawInput
-                            )
+                                  if (
+                                    data.toolName !== "proposeArticleOutline" ||
+                                    resumedOutlineToolIds.has(data.toolCallId)
+                                  ) {
+                                    return null
+                                  }
 
-                            if (!parsedOutline.success) {
-                              return null
-                            }
+                                  const parsedOutline = parseOutlineInput(
+                                    data.suspendPayload?.outline
+                                  )
 
-                            return (
-                              <ArticleOutlineEditor
-                                key={part.toolCallId}
-                                outline={parsedOutline.data}
-                                      onConfirm={(editedOutline: ArticleOutline) =>
-                                        addToolOutput({
-                                          tool: "proposeArticleOutline",
-                                          toolCallId: part.toolCallId,
-                                          output: editedOutline,
+                                  if (!parsedOutline.success) {
+                                    return null
+                                  }
+
+                                  return (
+                                    <ArticleOutlineEditor
+                                      key={part.id ?? data.toolCallId}
+                                      outline={parsedOutline.data}
+                                      onConfirm={(editedOutline: ArticleOutline) => {
+                                        if (
+                                          resumedOutlineToolsRef.current.has(
+                                            data.toolCallId
+                                          )
+                                        ) {
+                                          return
+                                        }
+
+                                        resumedOutlineToolsRef.current.add(
+                                          data.toolCallId
+                                        )
+                                        setResumedOutlineToolIds((current) =>
+                                          new Set(current).add(data.toolCallId)
+                                        )
+                                        void sendMessage(undefined, {
+                                          body: {
+                                            runId: data.runId,
+                                            resumeData: {
+                                              outline: editedOutline,
+                                            },
+                                          },
                                         })
-                                      }
+                                      }}
                                     />
                                   )
                                 })}

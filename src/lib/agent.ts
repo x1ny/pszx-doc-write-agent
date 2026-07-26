@@ -8,7 +8,7 @@ import type {
 
 type AssistantAgentUITools = {
   proposeArticleOutline: {
-    input: ArticleOutline;
+    input: { description: string };
     output: ArticleOutline;
   };
   writeMarkdownToPlate: {
@@ -38,8 +38,19 @@ type AssistantAgentUITools = {
   };
 };
 
+type AssistantAgentUIData = {
+  "tool-call-suspended": {
+    state: "data-tool-call-suspended";
+    runId: string;
+    toolCallId: string;
+    toolName: string;
+    suspendPayload: { outline: ArticleOutline };
+    resumeSchema?: unknown;
+  };
+};
+
 export type AssistantAgentUIMessage = UIMessage<
   unknown,
-  never,
+  AssistantAgentUIData,
   AssistantAgentUITools
 >;

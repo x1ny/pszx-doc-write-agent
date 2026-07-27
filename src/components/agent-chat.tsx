@@ -30,7 +30,49 @@ import { cn } from "@/lib/utils"
 import type { AssistantAgentUIMessage } from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
 
-const transport = new DefaultChatTransport({ api: "/api/chat" })
+const resourceStorageKey = "document-agent-resource-id"
+
+function getBrowserResourceId() {
+  if (typeof window === "undefined") {
+    return "document-agent-server"
+  }
+
+  try {
+    const existingId = window.localStorage.getItem(resourceStorageKey)
+
+    if (existingId) {
+      return existingId
+    }
+
+    const resourceId = `browser-${crypto.randomUUID()}`
+    window.localStorage.setItem(resourceStorageKey, resourceId)
+    return resourceId
+  } catch {
+    return "document-agent-browser"
+  }
+}
+
+const transport = new DefaultChatTransport({
+  api: "/api/chat",
+  prepareSendMessagesRequest: ({
+    body,
+    id,
+    messageId,
+    messages,
+    trigger,
+  }) => ({
+    body: {
+      ...body,
+      messages,
+      trigger,
+      messageId,
+      memory: {
+        thread: `chat-${id}`,
+        resource: getBrowserResourceId(),
+      },
+    },
+  }),
+})
 
 const selectionContextPattern = /<document_selection>([\s\S]*?)<\/document_selection>\s*/
 const clientToolPartTypes = new Set([

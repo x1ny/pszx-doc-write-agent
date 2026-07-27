@@ -7,6 +7,7 @@ import {
   simulateLeaderStyleAnalysis,
   verifyKnowledgeBase,
 } from '../tools/document-tools';
+import { documentMemory } from '../memory';
 
 const deepseek = createDeepSeek({
   apiKey: process.env.DEEPSEEK_API_KEY ?? '',
@@ -23,8 +24,11 @@ function formatDebugValue(value: unknown) {
 
 export const documentAgent = new Agent({
   id: 'document-agent',
+  memory: documentMemory,
   name: '公文写作助手',
-  instructions: `你是一个简洁、友好的中文公文写作助手。
+  instructions: `长期偏好规则：当用户明确表达“以后都这样”“请记住”“我的常用风格是”等会在未来对话中继续适用的写作偏好时，使用 Working Memory 保存或更新这些信息。优先记录稳定的风格、结构、语气、数据使用和常用表达偏好；不要保存一次性的任务内容或不必要的敏感信息。后续写作时应参考已保存的偏好。
+
+你是一个简洁、友好的中文公文写作助手。
 
 工作规则：
 - 优先直接回答用户的问题；用户询问当前时间时必须使用 getCurrentTime 工具，不要凭空编造时间。

@@ -17,6 +17,8 @@
     "@base-ui/react": "^1.6.0",
     "@mastra/ai-sdk": "^1.6.3",
     "@mastra/core": "^1.52.1",
+    "@mastra/libsql": "^1.17.0",
+    "@mastra/memory": "^1.23.1",
     "@platejs/basic-nodes": "^53.0.0",
     "@platejs/docx-io": "^53.3.2",
     "@platejs/floating": "^53.0.0",

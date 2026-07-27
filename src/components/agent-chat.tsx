@@ -421,6 +421,25 @@ export function AgentChat() {
                 ) : (
                   messages.map((message) => {
                     const isUser = message.role === "user"
+                    const latestStyleProgressPartKeys = new Map<string, string>()
+                    const completedStyleRewriteToolIds = new Set<string>()
+
+                    message.parts.forEach((part, index) => {
+                      if (part.type === "data-style-rewrite-result") {
+                        completedStyleRewriteToolIds.add(part.data.toolCallId)
+                        return
+                      }
+
+                      if (part.type !== "data-style-rewrite-progress") {
+                        return
+                      }
+
+                      const progressKey = part.data.toolCallId
+                      latestStyleProgressPartKeys.set(
+                        progressKey,
+                        part.id ?? `${message.id}-style-progress-${index}`
+                      )
+                    })
 
                     return (
                       <MessageScrollerItem
@@ -457,9 +476,20 @@ export function AgentChat() {
                                     .map((part) => part.text)
                                     .join("")}
                                 </Streamdown>
-                                {message.parts.map((part) => {
+                                {message.parts.map((part, index) => {
                                   if (part.type === "data-style-rewrite-progress") {
                                     const data = part.data
+                                    const progressPartKey =
+                                      part.id ?? `${message.id}-style-progress-${index}`
+
+                                    if (
+                                      latestStyleProgressPartKeys.get(data.toolCallId) !==
+                                        progressPartKey ||
+                                      completedStyleRewriteToolIds.has(data.toolCallId)
+                                    ) {
+                                      return null
+                                    }
+
                                     const isSearching = data.phase === "searching"
                                     const isFound = data.phase === "found"
 
@@ -484,7 +514,20 @@ export function AgentChat() {
                                   }
 
                                   if (part.type === "data-style-rewrite-result") {
-                                    return null
+                                    const data = part.data
+
+                                    return (
+                                      <div
+                                        key={part.id ?? `style-rewrite-result-${data.toolCallId}`}
+                                        className="order-first mt-4 flex items-center gap-2 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground"
+                                      >
+                                        <Database className="size-4 text-primary" aria-hidden="true" />
+                                        <span>
+                                          已完成{data.output.leaderName}的写作风格分析，参考了
+                                          {data.output.materialCount}篇历史材料
+                                        </span>
+                                      </div>
+                                    )
                                   }
 
                                   if (part.type !== "tool-verifyKnowledgeBase") {

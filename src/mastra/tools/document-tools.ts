@@ -69,6 +69,7 @@ export const simulateLeaderStyleAnalysis = createTool({
   execute: async ({ leaderName }, context) => {
     const normalizedLeaderName = leaderName.trim();
     const materialCount = 35;
+    const toolCallId = String(context.agent?.toolCallId ?? normalizedLeaderName);
     const emitProgress = async (
       phase: 'searching' | 'found' | 'summarizing',
       message: string
@@ -77,6 +78,7 @@ export const simulateLeaderStyleAnalysis = createTool({
         type: 'data-style-rewrite-progress',
         data: {
           state: 'data-style-rewrite-progress',
+          toolCallId,
           phase,
           leaderName: normalizedLeaderName,
           materialCount,
@@ -109,18 +111,15 @@ export const simulateLeaderStyleAnalysis = createTool({
       rewriteGuidance: fixedRewriteGuidance,
     };
 
-    const toolCallId = context.agent?.toolCallId;
-    if (toolCallId) {
-      await context.writer?.custom({
-        type: 'data-style-rewrite-result',
-        data: {
-          state: 'data-style-rewrite-result',
-          toolCallId,
-          output,
-        },
-        transient: true,
-      });
-    }
+    await context.writer?.custom({
+      type: 'data-style-rewrite-result',
+      data: {
+        state: 'data-style-rewrite-result',
+        toolCallId,
+        output,
+      },
+      transient: true,
+    });
 
     return output;
   },

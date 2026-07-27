@@ -59,6 +59,7 @@ type AssistantAgentUIData = {
   };
   "style-rewrite-progress": {
     state: "data-style-rewrite-progress";
+    toolCallId: string;
     phase: "searching" | "found" | "summarizing";
     leaderName: string;
     materialCount: number;

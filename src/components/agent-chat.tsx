@@ -558,6 +558,27 @@ export function AgentChat() {
                     const completedStyleRewriteToolIds = new Set<string>()
                     const latestDataRefreshProgressPartKeys = new Map<string, string>()
                     const completedDataRefreshToolIds = new Set<string>()
+                    const latestOutlineProgressPartKeys = new Map<string, string>()
+                    const completedOutlineToolIds = new Set<string>()
+
+                    message.parts.forEach((part, index) => {
+                      if (
+                        part.type === "data-tool-call-suspended" &&
+                        part.data.toolName === "proposeArticleOutline"
+                      ) {
+                        completedOutlineToolIds.add(part.data.toolCallId)
+                        return
+                      }
+
+                      if (part.type !== "data-outline-progress") {
+                        return
+                      }
+
+                      latestOutlineProgressPartKeys.set(
+                        part.data.toolCallId,
+                        part.id ?? `${message.id}-outline-progress-${index}`
+                      )
+                    })
 
                     message.parts.forEach((part, index) => {
                       if (part.type === "data-style-rewrite-result") {
@@ -629,6 +650,29 @@ export function AgentChat() {
                                     .join("")}
                                 </Streamdown>
                                 {message.parts.map((part, index) => {
+                                  if (part.type === "data-outline-progress") {
+                                    const data = part.data
+                                    const progressPartKey =
+                                      part.id ?? `${message.id}-outline-progress-${index}`
+
+                                    if (
+                                      latestOutlineProgressPartKeys.get(data.toolCallId) !==
+                                        progressPartKey ||
+                                      completedOutlineToolIds.has(data.toolCallId)
+                                    ) {
+                                      return null
+                                    }
+
+                                    return (
+                                      <ArticleOutlineEditor
+                                        key={`outline-progress-${data.toolCallId}`}
+                                        outline={data.outline}
+                                        isStreaming
+                                        onConfirm={() => undefined}
+                                      />
+                                    )
+                                  }
+
                                   if (part.type === "data-document-data-refresh-progress") {
                                     const data = part.data
                                     const progressPartKey =

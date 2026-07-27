@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,13 +10,21 @@ import { type ArticleOutline } from "@/lib/article-schema"
 type ArticleOutlineEditorProps = {
   outline: ArticleOutline
   onConfirm: (outline: ArticleOutline) => void
+  isStreaming?: boolean
 }
 
 export function ArticleOutlineEditor({
   outline,
   onConfirm,
+  isStreaming = false,
 }: ArticleOutlineEditorProps) {
   const [editedOutline, setEditedOutline] = useState(outline)
+
+  useEffect(() => {
+    if (isStreaming) {
+      setEditedOutline(outline)
+    }
+  }, [isStreaming, outline])
 
   function updateSection(
     sectionIndex: number,
@@ -45,6 +53,7 @@ export function ArticleOutlineEditor({
         <p className="text-sm font-medium">文章大纲</p>
         <Input
           value={editedOutline.title}
+          disabled={isStreaming}
           onChange={(event) =>
             setEditedOutline((current) => ({
               ...current,
@@ -56,6 +65,7 @@ export function ArticleOutlineEditor({
         />
         <Textarea
           value={editedOutline.summary}
+          disabled={isStreaming}
           onChange={(event) =>
             setEditedOutline((current) => ({
               ...current,
@@ -76,6 +86,7 @@ export function ArticleOutlineEditor({
             </p>
             <Input
               value={section.title}
+              disabled={isStreaming}
               onChange={(event) =>
                 updateSection(index, "title", event.target.value)
               }
@@ -84,6 +95,7 @@ export function ArticleOutlineEditor({
             />
             <Textarea
               value={section.purpose}
+              disabled={isStreaming}
               onChange={(event) =>
                 updateSection(index, "purpose", event.target.value)
               }
@@ -93,6 +105,7 @@ export function ArticleOutlineEditor({
             />
             <Textarea
               value={section.keyPoints.join("\n")}
+              disabled={isStreaming}
               onChange={(event) =>
                 updateSection(index, "keyPoints", event.target.value)
               }
@@ -104,11 +117,14 @@ export function ArticleOutlineEditor({
         ))}
       </div>
 
-      <Button type="button" onClick={() => onConfirm(editedOutline)}>
+      <Button
+        type="button"
+        disabled={isStreaming}
+        onClick={() => onConfirm(editedOutline)}
+      >
         确认大纲并生成文章
       </Button>
     </div>
   )
 }
-
 

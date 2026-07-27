@@ -62,6 +62,11 @@ type AssistantAgentUITools = {
 };
 
 type AssistantAgentUIData = {
+  "outline-progress": {
+    state: "data-outline-progress";
+    toolCallId: string;
+    outline: ArticleOutline;
+  };
   "tool-call-suspended": {
     state: "data-tool-call-suspended";
     runId: string;

@@ -3,26 +3,60 @@ import { createUIMessageStreamResponse } from 'ai';
 
 import { mastra } from '@/mastra';
 import { clientTools } from '@/mastra/tools/document-tools';
+import {
+  shouldKeepWorkingMemoryReadOnly,
+  shouldUseWorkingMemoryStyleRewrite,
+  workingMemoryStyleActiveTools,
+} from '@/lib/style-routing';
 
 export const runtime = 'nodejs';
 
-function formatDebugValue(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
+function getLatestUserText(messages: unknown) {
+  if (!Array.isArray(messages)) {
+    return '';
   }
+
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        typeof message === 'object' &&
+        message !== null &&
+        'role' in message &&
+        message.role === 'user'
+    );
+
+  if (!latestUserMessage || typeof latestUserMessage !== 'object') {
+    return '';
+  }
+
+  if ('content' in latestUserMessage && typeof latestUserMessage.content === 'string') {
+    return latestUserMessage.content;
+  }
+
+  if (!('parts' in latestUserMessage) || !Array.isArray(latestUserMessage.parts)) {
+    return '';
+  }
+
+  return latestUserMessage.parts
+    .filter(
+      (part: unknown): part is { type: string; text: string } =>
+        typeof part === 'object' &&
+        part !== null &&
+        'type' in part &&
+        part.type === 'text' &&
+        'text' in part &&
+        typeof part.text === 'string'
+    )
+    .map((part: { type: string; text: string }) => part.text)
+    .join('');
 }
 
 export async function POST(request: Request) {
   const params = await request.json();
-  const requestId = crypto.randomUUID();
-
-  console.log(`\n[ReAct][request-start] ${requestId}`);
-  console.log(
-    `[ReAct][request-mode] ${params.resumeData && params.runId ? 'resume' : 'initial'}`
-  );
-  console.log('[ReAct][request-params]', JSON.stringify(params, null, 2));
+  const latestUserText = getLatestUserText(params.messages);
+  const useWorkingMemoryStyle = shouldUseWorkingMemoryStyleRewrite(latestUserText);
+  const keepWorkingMemoryReadOnly = shouldKeepWorkingMemoryReadOnly(latestUserText);
 
   const stream = await handleChatStream({
     mastra,
@@ -31,23 +65,28 @@ export async function POST(request: Request) {
       ...params,
       clientTools,
       maxSteps: 5,
-      onStepFinish: (step: unknown) => {
-        console.log(`[ReAct][step-finish] ${requestId}`);
-        console.log('[ReAct][step]', formatDebugValue(step));
-      },
-      onFinish: (result: unknown) => {
-        console.log(`[ReAct][request-finish] ${requestId}`);
-        console.log('[ReAct][finish]', formatDebugValue(result));
-      },
+      ...(keepWorkingMemoryReadOnly
+        ? {
+            memory: {
+              ...(params.memory ?? {}),
+              options: {
+                ...(params.memory?.options ?? {}),
+                readOnly: true,
+              },
+            },
+          }
+        : {}),
+      ...(useWorkingMemoryStyle
+        ? {
+            activeTools: workingMemoryStyleActiveTools,
+            system:
+              '本轮必须使用 Working Memory 中已经保存的写作风格完成改写。不要调用 simulateLeaderStyleAnalysis，也不要猜测或学习任何人物风格。',
+          }
+        : {}),
     },
-    onError: (error) => {
-      console.error(`[ReAct][stream-error] ${requestId}`);
-      console.error(formatDebugValue(error));
-      return error instanceof Error ? error.message : String(error);
-    },
+    onError: (error) =>
+      error instanceof Error ? error.message : String(error),
   });
-
-  console.log(`[ReAct][stream-created] ${requestId}`);
 
   return createUIMessageStreamResponse({
     stream: stream as unknown as Parameters<

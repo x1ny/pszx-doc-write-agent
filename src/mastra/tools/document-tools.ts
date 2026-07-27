@@ -172,7 +172,7 @@ export const simulateDocumentDataRefresh = createTool({
 export const simulateLeaderStyleAnalysis = createTool({
   id: 'simulateLeaderStyleAnalysis',
   description:
-    '检索指定人物的历史材料并总结其写作风格。人物名称可以是任意文本；材料检索和分析过程为系统内置流程，最终返回固定的写作风格供后续改写使用。',
+    '仅当用户在当前消息中明确要求学习、检索、分析、研究或模仿某位明确指出的领导或作者的历史写作风格时使用。不要用于“风格改写”“按我的风格改写”或使用 Working Memory/已保存风格的请求，也不要从历史对话或 Working Memory 臆测人物名称。',
   inputSchema: z.object({
     leaderName: z.string().min(1).describe('用户希望模仿的领导或作者名称'),
   }),
@@ -240,20 +240,6 @@ export const proposeArticleOutline = createTool({
   id: 'proposeArticleOutline',
   description:
     '为较长公文生成结构化文章大纲，展示给用户编辑并等待用户提交编辑后的大纲；在用户提交前不要生成全文。',
-  onInputStart: ({ toolCallId }) => {
-    console.log(`\n[ReAct][tool-input-start] proposeArticleOutline (${toolCallId})`);
-  },
-  onInputDelta: ({ inputTextDelta }) => {
-    console.log('[ReAct][tool-input-delta] proposeArticleOutline', inputTextDelta);
-  },
-  onInputAvailable: ({ input, toolCallId }) => {
-    console.log(`\n[ReAct][tool-input-available] proposeArticleOutline (${toolCallId})`);
-    console.log('[ReAct][input]', JSON.stringify(input, null, 2));
-  },
-  onOutput: ({ output, toolName }) => {
-    console.log(`\n[ReAct][tool-output] ${toolName}`);
-    console.log('[ReAct][output]', JSON.stringify(output, null, 2));
-  },
   inputSchema: z.object({
     description: z.string().min(1).describe('用户希望创作的公文主题、目标和重点要求'),
   }),
@@ -268,8 +254,6 @@ export const proposeArticleOutline = createTool({
     const { resumeData, suspend } = context.agent ?? {};
 
     if (resumeData?.outline) {
-      console.log('\n[ReAct][outline-resumed] proposeArticleOutline');
-      console.log('[ReAct][edited-outline]', JSON.stringify(resumeData.outline, null, 2));
       return resumeData.outline;
     }
 
@@ -290,8 +274,6 @@ export const proposeArticleOutline = createTool({
       },
     });
 
-    console.log('\n[ReAct][outline-suspend] proposeArticleOutline');
-    console.log('[ReAct][outline]', JSON.stringify(output, null, 2));
     await suspend?.({ outline: output });
   },
 });

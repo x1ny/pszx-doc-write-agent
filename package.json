@@ -10,6 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "agent:test": "node scripts/test-agent.mjs",
+    "agent:style-routing-test": "node scripts/test-style-routing.mjs",
     "agent:data-refresh-test": "node scripts/test-document-data-refresh.mjs"
   },
   "dependencies": {

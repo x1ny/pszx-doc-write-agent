@@ -51,18 +51,60 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showSelectionToolbar, setShowSelectionToolbar] = useState(true);
+  const pendingMarkdownRef = useRef<string | null>(null);
+  const lastWrittenMarkdownRef = useRef<string | null>(null);
+  const markdownWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    return registerMarkdownWriter((markdown) => {
+    function flushMarkdown() {
+      markdownWriteTimerRef.current = null;
+      const markdown = pendingMarkdownRef.current;
+      pendingMarkdownRef.current = null;
+
+      if (
+        markdown === null ||
+        markdown === lastWrittenMarkdownRef.current
+      ) {
+        return;
+      }
+
       try {
         const nodes = editor
           .getApi(MarkdownPlugin)
           .markdown.deserialize(markdown);
 
         editor.tf.setValue(nodes as Value);
+        lastWrittenMarkdownRef.current = markdown;
       } catch {
         // 流式输入可能暂时停留在未闭合的 Markdown 语法中，等待下一段内容。
       }
+    }
+
+    const unregisterWriter = registerMarkdownWriter((markdown) => {
+      if (
+        markdown === lastWrittenMarkdownRef.current ||
+        markdown === pendingMarkdownRef.current
+      ) {
+        return;
+      }
+
+      pendingMarkdownRef.current = markdown;
+
+      if (markdownWriteTimerRef.current === null) {
+        markdownWriteTimerRef.current = setTimeout(flushMarkdown, 80);
+      }
     });
+
+    return () => {
+      unregisterWriter();
+
+      if (markdownWriteTimerRef.current !== null) {
+        clearTimeout(markdownWriteTimerRef.current);
+        markdownWriteTimerRef.current = null;
+      }
+
+      pendingMarkdownRef.current = null;
+    };
   }, [editor, registerMarkdownWriter]);
 
   useEffect(() => {

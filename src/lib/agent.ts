@@ -42,6 +42,19 @@ type AssistantAgentUITools = {
       answer: string;
     };
   };
+  simulateDocumentDataRefresh: {
+    input: { documentMarkdown: string; targetYear: string };
+    output: {
+      targetYear: string;
+      updatedMarkdown: string;
+      replacements: Array<{
+        original: string;
+        replacement: string;
+        reason: string;
+      }>;
+      summary: string;
+    };
+  };
   getCurrentTime: {
     input: { timeZone?: string };
     output: { timeZone: string; currentTime: string };
@@ -74,6 +87,28 @@ type AssistantAgentUIData = {
       styleSummary: string;
       styleFeatures: string[];
       rewriteGuidance: string[];
+    };
+  };
+  "document-data-refresh-progress": {
+    state: "data-document-data-refresh-progress";
+    toolCallId: string;
+    phase: "searching" | "found" | "updating";
+    targetYear: string;
+    replacementCount: number;
+    message: string;
+  };
+  "document-data-refresh-result": {
+    state: "data-document-data-refresh-result";
+    toolCallId: string;
+    output: {
+      targetYear: string;
+      updatedMarkdown: string;
+      replacements: Array<{
+        original: string;
+        replacement: string;
+        reason: string;
+      }>;
+      summary: string;
     };
   };
 };

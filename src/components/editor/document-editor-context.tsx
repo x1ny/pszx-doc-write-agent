@@ -11,6 +11,7 @@ import {
 
 type MarkdownWriter = (markdown: string) => void
 type PromptAppender = (text: string) => void
+type DocumentImporter = (file: File) => Promise<void>
 
 export type DocumentBlock = {
   path: number[]
@@ -43,6 +44,8 @@ type DocumentEditorContextValue = {
   closeEditor: () => void
   registerMarkdownWriter: (writer: MarkdownWriter) => () => void
   writeMarkdown: (markdown: string) => void
+  registerDocumentImporter: (importer: DocumentImporter) => () => void
+  importDocument: (file: File) => Promise<void>
   registerPromptAppender: (appender: PromptAppender) => () => void
   appendToPrompt: (text: string) => void
   registerDocumentReader: (reader: DocumentReader) => () => void
@@ -59,6 +62,7 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
   const [hasDocument, setHasDocument] = useState(false)
   const [isEditorOpen, setIsEditorOpen] = useState(false)
   const markdownWriterRef = useRef<MarkdownWriter | null>(null)
+  const documentImporterRef = useRef<DocumentImporter | null>(null)
   const promptAppenderRef = useRef<PromptAppender | null>(null)
   const documentReaderRef = useRef<DocumentReader | null>(null)
   const localEditApplierRef = useRef<LocalEditApplier | null>(null)
@@ -75,6 +79,26 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
 
   const writeMarkdown = useCallback((markdown: string) => {
     markdownWriterRef.current?.(markdown)
+  }, [])
+
+  const registerDocumentImporter = useCallback((importer: DocumentImporter) => {
+    documentImporterRef.current = importer
+
+    return () => {
+      if (documentImporterRef.current === importer) {
+        documentImporterRef.current = null
+      }
+    }
+  }, [])
+
+  const importDocument = useCallback((file: File) => {
+    const importer = documentImporterRef.current
+
+    if (!importer) {
+      return Promise.reject(new Error("编辑器尚未准备好"))
+    }
+
+    return importer(file)
   }, [])
 
   const revealEditor = useCallback(() => {
@@ -142,6 +166,8 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
         closeEditor,
         registerMarkdownWriter,
         writeMarkdown,
+        registerDocumentImporter,
+        importDocument,
         registerPromptAppender,
         appendToPrompt,
         registerDocumentReader,

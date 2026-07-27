@@ -7,6 +7,7 @@ import {
   Bot,
   Database,
   FileText,
+  FileUp,
   Loader2,
   MessageSquareQuote,
   Send,
@@ -126,7 +127,12 @@ function renderUserMessage(text: string, key: string) {
 export function AgentChat() {
   const [input, setInput] = useState("")
   const [selectedReference, setSelectedReference] = useState<string | null>(null)
+  const [importStatus, setImportStatus] = useState<{
+    type: "success" | "error" | "loading"
+    message: string
+  } | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const wasBusyRef = useRef(false)
   const handledMarkdownToolsRef = useRef(new Set<string>())
   const streamedMarkdownRef = useRef(new Map<string, string>())
@@ -139,6 +145,7 @@ export function AgentChat() {
   const {
     applyLocalEdit,
     hasDocument,
+    importDocument,
     isEditorOpen,
     readDocument,
     registerPromptAppender,
@@ -349,6 +356,45 @@ export function AgentChat() {
     await sendMessage({ text: messageText })
   }
 
+  function hasDocumentContent() {
+    const snapshot = readDocument()
+
+    return (
+      snapshot?.blocks.some(
+        (block) => block.type !== "p" || block.text.trim().length > 0
+      ) ?? false
+    )
+  }
+
+  async function handleDocumentImport(file: File) {
+    if (
+      hasDocumentContent() &&
+      !window.confirm("导入文档将替换当前内容，确定继续吗？")
+    ) {
+      setImportStatus(null)
+      return
+    }
+
+    setImportStatus({ type: "loading", message: "正在导入文档…" })
+
+    try {
+      await importDocument(file)
+      revealEditor()
+      setImportStatus({
+        type: "success",
+        message: `已导入 ${file.name}`,
+      })
+    } catch (error) {
+      setImportStatus({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "导入失败，请检查文件格式后重试",
+      })
+    }
+  }
+
   function handleSuggestedPrompt(prompt: string) {
     if (isBusy) {
       return
@@ -385,7 +431,52 @@ export function AgentChat() {
               className="block h-full min-h-0 w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[15px] text-[#1f2329] outline-none ring-0 placeholder:text-[#8f959e] disabled:cursor-not-allowed disabled:opacity-60 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             />
           </div>
-          <div className="flex shrink-0 justify-end px-3 pb-3">
+          <div
+            className="flex shrink-0 items-center justify-between gap-3 px-3 pb-3"
+            role="toolbar"
+            aria-label="输入工具栏"
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".docx,.md,.markdown,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+
+                  if (file) {
+                    void handleDocumentImport(file)
+                  }
+
+                  event.target.value = ""
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-[#646a73] transition-colors outline-none hover:bg-[#f3f4f6] hover:text-[#1f2329] focus-visible:ring-3 focus-visible:ring-[#3370ff]/30"
+              >
+                <FileUp className="size-4" aria-hidden="true" />
+                导入文档
+              </button>
+              {importStatus && (
+                <p
+                  className={cn(
+                    "truncate text-xs",
+                    importStatus.type === "error"
+                      ? "text-destructive"
+                      : importStatus.type === "success"
+                        ? "text-emerald-600"
+                        : "text-muted-foreground"
+                  )}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {importStatus.message}
+                </p>
+              )}
+            </div>
             <button
               type="submit"
               disabled={isBusy || !input.trim()}
@@ -465,10 +556,17 @@ export function AgentChat() {
                     const isUser = message.role === "user"
                     const latestStyleProgressPartKeys = new Map<string, string>()
                     const completedStyleRewriteToolIds = new Set<string>()
+                    const latestDataRefreshProgressPartKeys = new Map<string, string>()
+                    const completedDataRefreshToolIds = new Set<string>()
 
                     message.parts.forEach((part, index) => {
                       if (part.type === "data-style-rewrite-result") {
                         completedStyleRewriteToolIds.add(part.data.toolCallId)
+                        return
+                      }
+
+                      if (part.type === "data-document-data-refresh-result") {
+                        completedDataRefreshToolIds.add(part.data.toolCallId)
                         return
                       }
 
@@ -480,6 +578,18 @@ export function AgentChat() {
                       latestStyleProgressPartKeys.set(
                         progressKey,
                         part.id ?? `${message.id}-style-progress-${index}`
+                      )
+                    })
+
+                    message.parts.forEach((part, index) => {
+                      if (part.type !== "data-document-data-refresh-progress") {
+                        return
+                      }
+
+                      const progressKey = part.data.toolCallId
+                      latestDataRefreshProgressPartKeys.set(
+                        progressKey,
+                        part.id ?? `${message.id}-data-refresh-progress-${index}`
                       )
                     })
 
@@ -519,6 +629,69 @@ export function AgentChat() {
                                     .join("")}
                                 </Streamdown>
                                 {message.parts.map((part, index) => {
+                                  if (part.type === "data-document-data-refresh-progress") {
+                                    const data = part.data
+                                    const progressPartKey =
+                                      part.id ?? `${message.id}-data-refresh-progress-${index}`
+
+                                    if (
+                                      latestDataRefreshProgressPartKeys.get(data.toolCallId) !==
+                                        progressPartKey ||
+                                      completedDataRefreshToolIds.has(data.toolCallId)
+                                    ) {
+                                      return null
+                                    }
+
+                                    const isFound = data.phase === "found"
+
+                                    return (
+                                      <div
+                                        key={part.id ?? `${data.phase}-${data.toolCallId}`}
+                                        className="order-first mt-4 flex items-center gap-2 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground"
+                                      >
+                                        {isFound ? (
+                                          <Database className="size-4 text-primary" aria-hidden="true" />
+                                        ) : (
+                                          <Loader2 className="size-4 animate-spin text-primary" aria-hidden="true" />
+                                        )}
+                                        <span>{data.message}</span>
+                                        {data.replacementCount > 0 && (
+                                          <span className="text-xs text-muted-foreground/70">
+                                            {data.replacementCount} 处
+                                          </span>
+                                        )}
+                                      </div>
+                                    )
+                                  }
+
+                                  if (part.type === "data-document-data-refresh-result") {
+                                    const data = part.data
+
+                                    return (
+                                      <div
+                                        key={part.id ?? `data-refresh-result-${data.toolCallId}`}
+                                        className="order-first mt-4 flex flex-col gap-2 rounded-lg border border-border bg-background p-3 text-sm"
+                                      >
+                                        <div className="flex items-center gap-2 font-medium">
+                                          <Database className="size-4 text-primary" aria-hidden="true" />
+                                          已完成 {data.output.targetYear} 年数据更新
+                                        </div>
+                                        <p className="text-muted-foreground">
+                                          {data.output.summary}
+                                        </p>
+                                        {data.output.replacements.length > 0 && (
+                                          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                                            {data.output.replacements.map((replacement, replacementIndex) => (
+                                              <p key={`${data.toolCallId}-replacement-${replacementIndex}`}>
+                                                {replacement.original} → {replacement.replacement}
+                                              </p>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  }
+
                                   if (part.type === "data-style-rewrite-progress") {
                                     const data = part.data
                                     const progressPartKey =
@@ -548,7 +721,7 @@ export function AgentChat() {
                                         <span>{data.message}</span>
                                         {isSearching && (
                                           <span className="text-xs text-muted-foreground/70">
-                                            模拟检索
+                                            历史材料检索
                                           </span>
                                         )}
                                       </div>

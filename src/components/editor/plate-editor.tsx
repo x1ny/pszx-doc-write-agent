@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Code2,
   FileDown,
@@ -38,6 +38,7 @@ import {
 export function PlateEditor({ onClose }: { onClose?: () => void }) {
   const {
     appendToPrompt,
+    registerDocumentImporter,
     registerDocumentReader,
     registerLocalEditApplier,
     registerMarkdownWriter,
@@ -181,15 +182,60 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
     };
   }, [editor, registerDocumentReader, registerLocalEditApplier]);
 
+  const importDocument = useCallback(async (file: File) => {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    let nodes: Value;
+
+    if (extension === 'docx') {
+      const result = await importDocx(editor, await file.arrayBuffer());
+      nodes = result.nodes as Value;
+    } else if (extension === 'md' || extension === 'markdown') {
+      nodes = editor
+        .getApi(MarkdownPlugin)
+        .markdown.deserialize(await file.text()) as Value;
+    } else if (extension === 'txt') {
+      nodes = normalizeStaticValue(
+        (await file.text()).replace(/\r\n?/g, '\n').split('\n').map((text) => ({
+          children: [{ text }],
+          type: 'p',
+        }))
+      );
+    } else {
+      throw new Error('暂不支持该文件格式，请选择 DOCX、Markdown 或 TXT 文件');
+    }
+
+    editor.tf.setValue(nodes);
+    setFilename(
+      file.name.replace(/\.(docx|md|markdown|txt)$/i, '') || '导入的文档'
+    );
+  }, [editor]);
+
+  useEffect(() => registerDocumentImporter(importDocument), [
+    importDocument,
+    registerDocumentImporter,
+  ]);
+
   async function handleImport(file: File) {
     setIsImporting(true);
     try {
-      const result = await importDocx(editor, await file.arrayBuffer());
-      editor.tf.setValue(result.nodes as Value);
-      setFilename(file.name.replace(/\.docx$/i, '') || '导入的文档');
+      if (hasDocumentContent() && !window.confirm('导入文档将替换当前内容，确定继续吗？')) {
+        return;
+      }
+
+      await importDocument(file);
     } finally {
       setIsImporting(false);
     }
+  }
+
+  function hasDocumentContent() {
+    return (editor.children as Descendant[]).some((node, index) => {
+      if ('type' in node && node.type !== 'p') {
+        return true;
+      }
+
+      return editor.api.string([index]).trim().length > 0;
+    });
   }
 
   async function handleExport() {
@@ -241,7 +287,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".docx,.md,.markdown,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
             className="hidden"
             onChange={(event) => {
               const file = event.target.files?.[0];

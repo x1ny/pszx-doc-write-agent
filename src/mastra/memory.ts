@@ -3,7 +3,7 @@ import { Memory } from '@mastra/memory';
 
 export const documentMemoryStorage = new LibSQLStore({
   id: 'document-agent-memory',
-  url: 'file:./mastra.db',
+  url: process.env.MASTRA_DB_URL || 'file:./mastra.db',
 });
 
 export const documentMemory = new Memory({

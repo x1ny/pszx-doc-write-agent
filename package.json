@@ -9,6 +9,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "docker:build": "node scripts/build-push.js",
+    "release": "node scripts/release.js",
+    "deploy:test": "node scripts/deploy-test.js",
     "agent:test": "node scripts/test-agent.mjs",
     "agent:style-routing-test": "node scripts/test-style-routing.mjs",
     "agent:data-refresh-test": "node scripts/test-document-data-refresh.mjs"

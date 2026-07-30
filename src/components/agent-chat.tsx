@@ -1,6 +1,6 @@
 "use client"
 
-import { DefaultChatTransport } from "ai"
+import { DefaultChatTransport, type FileUIPart } from "ai"
 import { useChat } from "@ai-sdk/react"
 import {
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   FileUp,
   Loader2,
   MessageSquareQuote,
+  Paperclip,
   Send,
   X,
 } from "lucide-react"
@@ -18,6 +19,14 @@ import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useDocumentEditor } from "@/components/editor/document-editor-context"
 import {
   MessageScroller,
@@ -76,6 +85,23 @@ const transport = new DefaultChatTransport({
 })
 
 const selectionContextPattern = /<document_selection>([\s\S]*?)<\/document_selection>\s*/
+
+type UploadedFile = {
+  id: string
+  originalName: string
+  mimeType: string
+  size: number
+  extension: string
+  createdAt: string
+  viewUrl: string
+  downloadUrl: string
+}
+
+type FileStatus = {
+  type: "success" | "error" | "loading"
+  message: string
+}
+
 const clientToolPartTypes = new Set([
   "tool-writeMarkdownToPlate",
   "tool-getDocumentSnapshot",
@@ -131,8 +157,14 @@ export function AgentChat() {
     type: "success" | "error" | "loading"
     message: string
   } | null>(null)
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const [uploadStatus, setUploadStatus] = useState<FileStatus | null>(null)
+  const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null)
+  const [previewContent, setPreviewContent] = useState("")
+  const [previewStatus, setPreviewStatus] = useState<FileStatus | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadFileInputRef = useRef<HTMLInputElement>(null)
   const wasBusyRef = useRef(false)
   const handledMarkdownToolsRef = useRef(new Set<string>())
   const streamedMarkdownRef = useRef(new Map<string, string>())
@@ -343,7 +375,7 @@ export function AgentChat() {
     event.preventDefault()
     const text = input.trim()
 
-    if (!text || isBusy) {
+    if ((!text && uploadedFiles.length === 0) || isBusy) {
       return
     }
 
@@ -351,9 +383,22 @@ export function AgentChat() {
       ? `<document_selection>${selectedReference}</document_selection>${text}`
       : text
 
+    const attachments = uploadedFiles
     setInput("")
     setSelectedReference(null)
-    await sendMessage({ text: messageText })
+    setUploadedFiles([])
+    setUploadStatus(null)
+    const fileParts: FileUIPart[] = attachments.map((file) => ({
+      type: "file",
+      url: file.viewUrl,
+      mediaType: file.mimeType,
+      filename: file.originalName,
+    }))
+
+    await sendMessage({
+      text: messageText || "请阅读我上传的文件。",
+      files: fileParts,
+    })
   }
 
   function hasDocumentContent() {
@@ -395,6 +440,75 @@ export function AgentChat() {
     }
   }
 
+  function formatFileSize(size: number) {
+    if (size < 1024) return `${size} B`
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  async function handleFileUpload(file: File) {
+    setUploadStatus({ type: "loading", message: "正在上传文件…" })
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      const response = await fetch("/api/files", {
+        method: "POST",
+        body: formData,
+      })
+      const result = (await response.json()) as UploadedFile & { error?: string }
+
+      if (!response.ok) {
+        throw new Error(result.error || "文件上传失败")
+      }
+
+      setUploadedFiles((current) => [
+        ...current.filter((item) => item.id !== result.id),
+        result,
+      ])
+      setUploadStatus({ type: "success", message: "文件已上传" })
+    } catch (error) {
+      setUploadStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "文件上传失败",
+      })
+    }
+  }
+
+  async function handlePreview(file: UploadedFile) {
+    setPreviewFile(file)
+    setPreviewContent("")
+    setPreviewStatus({ type: "loading", message: "正在加载预览…" })
+
+    try {
+      const url = new URL(file.viewUrl, window.location.origin)
+      url.searchParams.set("preview", "1")
+      const response = await fetch(url)
+      const result = await response.text()
+
+      if (!response.ok) {
+        let message = result || "文件预览失败"
+
+        try {
+          const errorResult = JSON.parse(result) as { error?: string }
+          message = errorResult.error || message
+        } catch {
+          // 保留接口返回的纯文本错误信息。
+        }
+
+        throw new Error(message)
+      }
+
+      setPreviewContent(result)
+      setPreviewStatus(null)
+    } catch (error) {
+      setPreviewStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "文件预览失败",
+      })
+    }
+  }
+
   function handleSuggestedPrompt(prompt: string) {
     if (isBusy) {
       return
@@ -410,9 +524,55 @@ export function AgentChat() {
         <div
           className={cn(
             "relative flex w-full flex-col overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-[0_2px_12px_rgba(0,0,0,0.06)] transition-colors focus-within:border-[#3370ff]",
-            messages.length === 0 ? "h-32 min-h-32" : "h-28 min-h-28"
+            uploadedFiles.length > 0
+              ? messages.length === 0
+                ? "h-44 min-h-44"
+                : "h-40 min-h-40"
+              : messages.length === 0
+                ? "h-32 min-h-32"
+                : "h-28 min-h-28"
           )}
         >
+          {uploadedFiles.length > 0 && (
+            <div className="flex max-h-20 shrink-0 flex-wrap gap-2 overflow-y-auto border-b border-border/70 px-3 pt-3">
+              {uploadedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex min-w-0 max-w-full items-center gap-1 rounded-xl border border-border bg-muted/40 p-1"
+                >
+                  <button
+                    type="button"
+                    onClick={() => void handlePreview(file)}
+                    className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-left outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/50"
+                    aria-label={`预览 ${file.originalName}`}
+                  >
+                    <FileText className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                    <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                      {file.originalName}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {formatFileSize(file.size)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadedFiles((current) =>
+                        current.filter((item) => item.id !== file.id)
+                      )
+                      if (uploadedFiles.length === 1) {
+                        setUploadStatus(null)
+                      }
+                    }}
+                    className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                    aria-label={`移除 ${file.originalName}`}
+                  >
+                    <X data-icon="inline-start" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="min-h-[3.75rem] flex-1 overflow-hidden px-4 pt-3.5">
             <textarea
               ref={inputRef}
@@ -452,6 +612,21 @@ export function AgentChat() {
                   event.target.value = ""
                 }}
               />
+              <input
+                ref={uploadFileInputRef}
+                type="file"
+                accept=".docx,.md,.markdown,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+
+                  if (file) {
+                    void handleFileUpload(file)
+                  }
+
+                  event.target.value = ""
+                }}
+              />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -460,6 +635,16 @@ export function AgentChat() {
                 <FileUp className="size-4" aria-hidden="true" />
                 导入文档
               </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={isBusy}
+                onClick={() => uploadFileInputRef.current?.click()}
+              >
+                <Paperclip data-icon="inline-start" />
+                上传文件
+              </Button>
               {importStatus && (
                 <p
                   className={cn(
@@ -476,10 +661,26 @@ export function AgentChat() {
                   {importStatus.message}
                 </p>
               )}
+              {uploadStatus && (
+                <p
+                  className={cn(
+                    "truncate text-xs",
+                    uploadStatus.type === "error"
+                      ? "text-destructive"
+                      : uploadStatus.type === "success"
+                        ? "text-emerald-600"
+                        : "text-muted-foreground"
+                  )}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {uploadStatus.message}
+                </p>
+              )}
             </div>
             <button
               type="submit"
-              disabled={isBusy || !input.trim()}
+              disabled={isBusy || (!input.trim() && uploadedFiles.length === 0)}
               aria-label="发送消息"
               className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg bg-[#3370ff] text-white transition-colors outline-none hover:bg-[#3370ff]/90 focus-visible:ring-3 focus-visible:ring-[#3370ff]/30 disabled:pointer-events-none disabled:opacity-50"
             >
@@ -636,11 +837,32 @@ export function AgentChat() {
                             )}
                           >
                             {isUser ? (
-                              message.parts.map((part, index) =>
-                                part.type === "text"
-                                  ? renderUserMessage(part.text, `${message.id}-${index}`)
-                                  : null
-                              )
+                              <span className="flex flex-col gap-2">
+                                {message.parts.map((part, index) => {
+                                  if (part.type === "text") {
+                                    return renderUserMessage(part.text, `${message.id}-${index}`)
+                                  }
+
+                                  if (part.type === "file") {
+                                    return (
+                                      <a
+                                        key={`${message.id}-${index}`}
+                                        href={part.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="flex min-w-44 max-w-full items-center gap-2 rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 px-3 py-2 text-left transition-colors hover:bg-primary-foreground/20"
+                                      >
+                                        <FileText className="size-4 shrink-0" aria-hidden="true" />
+                                        <span className="min-w-0 truncate text-xs font-medium">
+                                          {part.filename || "文件附件"}
+                                        </span>
+                                      </a>
+                                    )
+                                  }
+
+                                  return null
+                                })}
+                              </span>
                             ) : (
                               <>
                                 <Streamdown isAnimating={isBusy}>
@@ -957,6 +1179,45 @@ export function AgentChat() {
           )}
         </div>
       </div>
+
+      <Dialog
+        open={previewFile !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewFile(null)
+            setPreviewStatus(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{previewFile?.originalName || "文件预览"}</DialogTitle>
+            <DialogDescription>
+              {previewFile
+                ? `${previewFile.extension.toUpperCase().replace(".", "")} · ${formatFileSize(previewFile.size)}`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="mt-4">
+            {previewStatus?.type === "loading" && (
+              <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                {previewStatus.message}
+              </div>
+            )}
+            {previewStatus?.type === "error" && (
+              <div className="flex h-64 items-center justify-center text-sm text-destructive">
+                {previewStatus.message}
+              </div>
+            )}
+            {!previewStatus && (
+              <pre className="max-h-[min(560px,calc(100vh-12rem))] overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-muted/30 p-4 text-sm leading-6 text-foreground">
+                {previewContent || "文件没有可预览的文本内容。"}
+              </pre>
+            )}
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -49,3 +49,6 @@ mastra.db
 mastra.db-wal
 mastra.db-shm
 mastra.db-*
+
+# local uploaded files
+.data/

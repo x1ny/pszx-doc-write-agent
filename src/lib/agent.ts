@@ -1,5 +1,6 @@
 import type { UIMessage } from 'ai';
 
+import type { DocumentMaterial } from '@/lib/document-material';
 import type { ArticleOutline } from '@/lib/article-schema';
 import type {
   DocumentBlock,
@@ -7,6 +8,12 @@ import type {
 } from '@/components/editor/document-editor-context';
 
 type AssistantAgentUITools = {
+  "workflow-buildStyleProfileWorkflow": {
+    input: {
+      subject: { name: string; organization?: string };
+    };
+    output: { styleProfile: string };
+  };
   proposeArticleOutline: {
     input: { description: string };
     output: ArticleOutline;
@@ -72,7 +79,13 @@ type AssistantAgentUIData = {
     runId: string;
     toolCallId: string;
     toolName: string;
-    suspendPayload: { outline: ArticleOutline };
+    suspendPayload: {
+      outline?: ArticleOutline;
+      type?: "style-reference-selection";
+      subject?: { name: string; organization?: string };
+      candidates?: DocumentMaterial[];
+      defaultSelectedDocumentIds?: string[];
+    };
     resumeSchema?: unknown;
   };
   "style-rewrite-progress": {

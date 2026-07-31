@@ -1,10 +1,9 @@
 import { config } from 'dotenv';
-import { createDeepSeek } from '@ai-sdk/deepseek';
-import { generateText } from 'ai';
 import mammoth from 'mammoth';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createJiti } from 'jiti';
 
 config({ path: '.env.local', quiet: true });
 config({ path: '.env', quiet: true });
@@ -12,7 +11,6 @@ config({ path: '.env', quiet: true });
 const startedAt = Date.now();
 
 const projectRoot = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const promptPath = resolve(projectRoot, 'prompt.txt');
 const defaultDocxPath = resolve(
   projectRoot,
   'src/assets/doc/农业局局长公文/2024年福建省农业农村厅工作报告.docx'
@@ -102,38 +100,19 @@ async function readArticle() {
   return result.value || defaultArticle;
 }
 
-const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-if (!apiKey) {
-  throw new Error(
-    '未找到 DEEPSEEK_API_KEY，请先在 .env.local 中配置模型访问密钥。'
-  );
-}
-
-const systemPrompt = await readFile(promptPath, 'utf8');
 const article = (await readArticle()).trim();
 if (!article) {
   throw new Error('待分析的文章内容不能为空。');
 }
 
-const deepseek = createDeepSeek({
-  apiKey,
-  baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
-});
-
-const result = await generateText({
-  model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
-  system: systemPrompt,
-  prompt: `请分析以下待分析文章，并严格按照系统提示词输出 Style Profile。\n\n--- 待分析文章开始 ---\n${article}\n--- 待分析文章结束 ---`,
-  maxOutputTokens: 12000,
-  providerOptions: {
-    deepseek: {
-      thinking: { type: 'disabled' },
-    },
-  },
-});
+const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
+const { analyzeStyleProfile } = await jiti.import(
+  '../src/mastra/document/style-profile.ts'
+);
+const styleProfile = await analyzeStyleProfile(article);
 
 const elapsedMs = Date.now() - startedAt;
 console.error(
   `[StyleProfile] 总运行时间：${elapsedMs} ms（${(elapsedMs / 1000).toFixed(2)} 秒）`
 );
-console.log(result.text);
+console.log(styleProfile);

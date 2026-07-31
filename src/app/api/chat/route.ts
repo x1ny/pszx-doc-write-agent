@@ -2,7 +2,7 @@ import { handleChatStream } from '@mastra/ai-sdk';
 import { createUIMessageStreamResponse } from 'ai';
 
 import { mastra } from '@/mastra';
-import { clientTools } from '@/mastra/tools/document-tools';
+import { clientTools } from '@/mastra/document/tools';
 import {
   shouldKeepWorkingMemoryReadOnly,
   shouldUseWorkingMemoryStyleRewrite,

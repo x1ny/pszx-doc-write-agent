@@ -12,7 +12,7 @@ const prompt = process.argv.slice(2).join(' ').trim() ||
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const { mastra } = await jiti.import('../src/mastra/index.ts');
 const { simulateLeaderStyleAnalysis } = await jiti.import(
-  '../src/mastra/tools/document-tools.ts'
+  '../src/mastra/document/leader-style.ts'
 );
 
 const currentDocument = {

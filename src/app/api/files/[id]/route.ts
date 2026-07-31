@@ -11,10 +11,8 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  );
+function isSafeMaterialId(value: string) {
+  return /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value);
 }
 
 function jsonError(message: string, status: number) {
@@ -67,7 +65,7 @@ function parseRecord(value: unknown): UploadedFileRecord | null {
 export async function GET(request: Request, { params }: RouteContext) {
   const { id } = await params;
 
-  if (!isUuid(id)) {
+  if (!isSafeMaterialId(id)) {
     return jsonError('文件 ID 无效。', 400);
   }
 

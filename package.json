@@ -15,6 +15,8 @@
     "agent:test": "node scripts/test-agent.mjs",
     "style:profile:test": "node scripts/test-style-profile.mjs",
     "agent:style-routing-test": "node scripts/test-style-routing.mjs",
+    "style:workflow:test": "node scripts/test-style-profile-workflow.mjs",
+    "materials:test": "node scripts/test-document-materials.mjs",
     "agent:data-refresh-test": "node scripts/test-document-data-refresh.mjs",
     "agent:file-prompt-test": "node scripts/test-uploaded-file-prompt.mjs",
     "agent:file-chat-test": "node scripts/test-uploaded-file-agent.mjs"

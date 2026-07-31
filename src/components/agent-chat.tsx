@@ -154,10 +154,6 @@ function renderUserMessage(text: string, key: string) {
 export function AgentChat() {
   const [input, setInput] = useState("")
   const [selectedReference, setSelectedReference] = useState<string | null>(null)
-  const [importStatus, setImportStatus] = useState<{
-    type: "success" | "error" | "loading"
-    message: string
-  } | null>(null)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null)
   const [previewContent, setPreviewContent] = useState("")
@@ -415,26 +411,21 @@ export function AgentChat() {
       hasDocumentContent() &&
       !window.confirm("导入文档将替换当前内容，确定继续吗？")
     ) {
-      setImportStatus(null)
       return
     }
-
-    setImportStatus({ type: "loading", message: "正在导入文档…" })
 
     try {
       await importDocument(file)
       revealEditor()
-      setImportStatus({
-        type: "success",
-        message: `已导入 ${file.name}`,
-      })
     } catch (error) {
-      setImportStatus({
+      toast.add({
         type: "error",
-        message:
+        title: "导入文档失败",
+        description:
           error instanceof Error
             ? error.message
             : "导入失败，请检查文件格式后重试",
+        timeout: 5000,
       })
     }
   }
@@ -651,22 +642,6 @@ export function AgentChat() {
                 <Paperclip className="size-4" aria-hidden="true" />
                 上传文件
               </button>
-              {importStatus && (
-                <p
-                  className={cn(
-                    "truncate text-xs",
-                    importStatus.type === "error"
-                      ? "text-destructive"
-                      : importStatus.type === "success"
-                        ? "text-emerald-600"
-                        : "text-muted-foreground"
-                  )}
-                  role="status"
-                  aria-live="polite"
-                >
-                  {importStatus.message}
-                </p>
-              )}
             </div>
             <button
               type="submit"

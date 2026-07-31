@@ -36,6 +36,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
+import { Toaster, toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import type { AssistantAgentUIMessage } from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
@@ -158,7 +159,6 @@ export function AgentChat() {
     message: string
   } | null>(null)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
-  const [uploadStatus, setUploadStatus] = useState<FileStatus | null>(null)
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null)
   const [previewContent, setPreviewContent] = useState("")
   const [previewStatus, setPreviewStatus] = useState<FileStatus | null>(null)
@@ -387,7 +387,6 @@ export function AgentChat() {
     setInput("")
     setSelectedReference(null)
     setUploadedFiles([])
-    setUploadStatus(null)
     const fileParts: FileUIPart[] = attachments.map((file) => ({
       type: "file",
       url: file.viewUrl,
@@ -447,7 +446,11 @@ export function AgentChat() {
   }
 
   async function handleFileUpload(file: File) {
-    setUploadStatus({ type: "loading", message: "正在上传文件…" })
+    const toastId = toast.add({
+      type: "loading",
+      title: "正在上传文件…",
+      timeout: 0,
+    })
 
     try {
       const formData = new FormData()
@@ -466,11 +469,18 @@ export function AgentChat() {
         ...current.filter((item) => item.id !== result.id),
         result,
       ])
-      setUploadStatus({ type: "success", message: "文件已上传" })
+      toast.update(toastId, {
+        type: "success",
+        title: "文件已上传",
+        description: file.name,
+        timeout: 3000,
+      })
     } catch (error) {
-      setUploadStatus({
+      toast.update(toastId, {
         type: "error",
-        message: error instanceof Error ? error.message : "文件上传失败",
+        title: "文件上传失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+        timeout: 5000,
       })
     }
   }
@@ -534,7 +544,7 @@ export function AgentChat() {
           )}
         >
           {uploadedFiles.length > 0 && (
-            <div className="flex max-h-20 shrink-0 flex-wrap gap-2 overflow-y-auto border-b border-border/70 px-3 pt-3">
+            <div className="flex max-h-20 shrink-0 flex-wrap gap-2 overflow-y-auto border-b border-border/70 px-3 pt-3 pb-2">
               {uploadedFiles.map((file) => (
                 <div
                   key={file.id}
@@ -560,9 +570,6 @@ export function AgentChat() {
                       setUploadedFiles((current) =>
                         current.filter((item) => item.id !== file.id)
                       )
-                      if (uploadedFiles.length === 1) {
-                        setUploadStatus(null)
-                      }
                     }}
                     className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                     aria-label={`移除 ${file.originalName}`}
@@ -635,16 +642,15 @@ export function AgentChat() {
                 <FileUp className="size-4" aria-hidden="true" />
                 导入文档
               </button>
-              <Button
+              <button
                 type="button"
-                variant="ghost"
-                size="sm"
                 disabled={isBusy}
                 onClick={() => uploadFileInputRef.current?.click()}
+                className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-[#646a73] transition-colors outline-none hover:bg-[#f3f4f6] hover:text-[#1f2329] focus-visible:ring-3 focus-visible:ring-[#3370ff]/30"
               >
-                <Paperclip data-icon="inline-start" />
+                <Paperclip className="size-4" aria-hidden="true" />
                 上传文件
-              </Button>
+              </button>
               {importStatus && (
                 <p
                   className={cn(
@@ -659,22 +665,6 @@ export function AgentChat() {
                   aria-live="polite"
                 >
                   {importStatus.message}
-                </p>
-              )}
-              {uploadStatus && (
-                <p
-                  className={cn(
-                    "truncate text-xs",
-                    uploadStatus.type === "error"
-                      ? "text-destructive"
-                      : uploadStatus.type === "success"
-                        ? "text-emerald-600"
-                        : "text-muted-foreground"
-                  )}
-                  role="status"
-                  aria-live="polite"
-                >
-                  {uploadStatus.message}
                 </p>
               )}
             </div>
@@ -700,7 +690,8 @@ export function AgentChat() {
   )
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
+    <Toaster>
+      <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
       {hasDocument && !isEditorOpen && (
         <div className="flex h-12 shrink-0 items-center justify-end border-b px-6">
           <Button type="button" variant="outline" size="sm" onClick={revealEditor}>
@@ -832,17 +823,13 @@ export function AgentChat() {
                             className={cn(
                               "text-sm leading-7",
                               isUser
-                                ? "max-w-[72%] rounded-2xl bg-muted px-4 py-2.5 text-foreground"
+                                ? "flex max-w-[72%] flex-col items-end gap-2"
                                 : "flex max-w-[88%] flex-col gap-4"
                             )}
                           >
                             {isUser ? (
-                              <span className="flex flex-col gap-2">
+                              <>
                                 {message.parts.map((part, index) => {
-                                  if (part.type === "text") {
-                                    return renderUserMessage(part.text, `${message.id}-${index}`)
-                                  }
-
                                   if (part.type === "file") {
                                     return (
                                       <a
@@ -850,11 +837,18 @@ export function AgentChat() {
                                         href={part.url}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="flex min-w-44 max-w-full items-center gap-2 rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 px-3 py-2 text-left transition-colors hover:bg-primary-foreground/20"
+                                        className="flex w-fit min-w-44 max-w-full items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-left shadow-sm transition-colors hover:bg-muted/50"
                                       >
-                                        <FileText className="size-4 shrink-0" aria-hidden="true" />
-                                        <span className="min-w-0 truncate text-xs font-medium">
-                                          {part.filename || "文件附件"}
+                                        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                                          <FileText className="size-5" aria-hidden="true" />
+                                        </span>
+                                        <span className="flex min-w-0 flex-col">
+                                          <span className="break-all text-sm font-semibold leading-5 text-foreground">
+                                            {part.filename || "文件附件"}
+                                          </span>
+                                          <span className="text-xs leading-4 text-muted-foreground">
+                                            文档
+                                          </span>
                                         </span>
                                       </a>
                                     )
@@ -862,7 +856,21 @@ export function AgentChat() {
 
                                   return null
                                 })}
-                              </span>
+                                {message.parts.some((part) => part.type === "text") && (
+                                  <div className="max-w-full rounded-2xl bg-muted px-4 py-2.5 text-foreground">
+                                    <span className="flex flex-col gap-2">
+                                      {message.parts.map((part, index) =>
+                                        part.type === "text"
+                                          ? renderUserMessage(
+                                              part.text,
+                                              `${message.id}-${index}`
+                                            )
+                                          : null
+                                      )}
+                                    </span>
+                                  </div>
+                                )}
+                              </>
                             ) : (
                               <>
                                 <Streamdown isAnimating={isBusy}>
@@ -1218,6 +1226,7 @@ export function AgentChat() {
           </DialogBody>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </Toaster>
   )
 }

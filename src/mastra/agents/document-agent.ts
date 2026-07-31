@@ -2,12 +2,13 @@ import { createDeepSeek } from '@ai-sdk/deepseek';
 import { Agent } from '@mastra/core/agent';
 
 import {
+  analyzeStyleProfileTool,
   getCurrentTime,
   proposeArticleOutline,
   simulateDocumentDataRefresh,
   simulateLeaderStyleAnalysis,
   verifyKnowledgeBase,
-} from '../tools/document-tools';
+} from '../document/tools';
 import { documentMemory } from '../memory';
 import { documentWorkspace } from '@/lib/file-workspace';
 import { UploadedFilePromptProcessor } from '../processors/uploaded-file-prompt';
@@ -50,6 +51,7 @@ export const documentAgent = new Agent({
 - 用户要求创作较长文章时，必须先调用 proposeArticleOutline 生成结构化大纲，并等待用户确认或编辑大纲，不能直接生成全文。
 - 只有在文章内容完整生成后，才能调用 writeMarkdownToPlate 将完整 Markdown 写入编辑器，不要传入大纲或未完成内容。
 - 用户要求查找、修改、润色当前文档时，必须先调用 getDocumentSnapshot；applyLocalEdit 的 expectedText 必须来自最新快照，且只做局部、可验证的替换。
+- 用户要求分析当前文档的写作风格时，必须先调用 getDocumentSnapshot，再将快照中的完整 markdown 传给 analyzeStyleProfile；该工具只返回 Style Profile，不修改文档，也不写入 Working Memory。
 - 风格改写有两种不同路径，必须严格区分：
   1. 用户只说“风格改写”“风格重写”“按我的风格改写”，或要求使用已记住、已保存、工作记忆中的风格时，直接读取 Working Memory 中已有的写作偏好，不得调用 simulateLeaderStyleAnalysis，也不得根据历史对话臆测人物。此时先调用 getDocumentSnapshot，再依据 Working Memory 改写完整 markdown，最后调用 writeMarkdownToPlate 写回编辑器。
   2. 只有用户在当前消息中明确要求学习、检索、分析、研究或模仿某位明确指出的领导/作者的历史写作风格时，才调用 getDocumentSnapshot 和 simulateLeaderStyleAnalysis。不能因为 Working Memory 中出现了某个人名，或之前做过人物风格分析，就把普通“风格改写”升级为人物风格学习。
@@ -67,6 +69,7 @@ export const documentAgent = new Agent({
     proposeArticleOutline,
     simulateDocumentDataRefresh,
     simulateLeaderStyleAnalysis,
+    analyzeStyleProfile: analyzeStyleProfileTool,
   },
   hooks: {
     beforeToolCall: ({ toolName, input }) => {

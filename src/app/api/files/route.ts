@@ -9,6 +9,7 @@ import {
   uploadFilesystem,
   type UploadedFileRecord,
 } from '@/lib/file-workspace';
+import { createDocumentMaterial } from '@/mastra/document/materials';
 
 export const runtime = 'nodejs';
 
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
     extension,
     contentPath,
     createdAt: new Date().toISOString(),
+    sourceType: 'upload',
   };
 
   try {
@@ -78,17 +80,5 @@ export async function POST(request: Request) {
     return jsonError('文件保存失败。', 500);
   }
 
-  return Response.json(
-    {
-      id: record.id,
-      originalName: record.originalName,
-      mimeType: record.mimeType,
-      size: record.size,
-      extension: record.extension,
-      createdAt: record.createdAt,
-      viewUrl: `/api/files/${record.id}`,
-      downloadUrl: `/api/files/${record.id}?download=1`,
-    },
-    { status: 201 },
-  );
+  return Response.json(createDocumentMaterial(record), { status: 201 });
 }

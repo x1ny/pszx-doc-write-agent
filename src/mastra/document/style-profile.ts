@@ -4,6 +4,23 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
 import { styleProfileSystemPrompt } from './style-profile-prompt';
+import { styleProfileSynthesisSystemPrompt } from './style-profile-synthesis-prompt';
+
+function createStyleProfileModel() {
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error(
+      '未找到 DEEPSEEK_API_KEY，请先在 .env.local 中配置模型访问密钥。'
+    );
+  }
+
+  const deepseek = createDeepSeek({
+    apiKey,
+    baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
+  });
+
+  return deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat');
+}
 
 /**
  * 根据公文原文提取可以迁移到后续写作中的 Style Profile。
@@ -20,26 +37,49 @@ export async function analyzeStyleProfile(
     throw new Error('待分析的文章内容不能为空。');
   }
 
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error(
-      '未找到 DEEPSEEK_API_KEY，请先在 .env.local 中配置模型访问密钥。'
-    );
-  }
-
-  const deepseek = createDeepSeek({
-    apiKey,
-    baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
-  });
-
   const result = await generateText({
-    model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
+    model: createStyleProfileModel(),
     system: styleProfileSystemPrompt,
     prompt: `请分析以下待分析文章，并严格按照系统提示词输出 Style Profile。
 
 --- 待分析文章开始 ---
 ${normalizedArticle}
 --- 待分析文章结束 ---`,
+    maxOutputTokens: 12000,
+    abortSignal: options.abortSignal,
+    providerOptions: {
+      deepseek: {
+        thinking: { type: 'disabled' },
+      },
+    },
+  });
+
+  return result.text.trim();
+}
+
+export async function synthesizeStyleProfile(
+  subjectName: string,
+  analyses: string[],
+  options: { abortSignal?: AbortSignal } = {}
+) {
+  const normalizedAnalyses = analyses
+    .map((analysis) => analysis.trim())
+    .filter(Boolean);
+  if (!normalizedAnalyses.length) {
+    throw new Error('没有可用于汇总的风格分析结果。');
+  }
+
+  const result = await generateText({
+    model: createStyleProfileModel(),
+    system: styleProfileSynthesisSystemPrompt.replace('{姓名}', subjectName),
+    prompt: [
+      `目标人物：${subjectName}`,
+      '',
+      ...normalizedAnalyses.map(
+        (analysis, index) =>
+          `--- 单篇风格分析 ${index + 1} 开始 ---\n${analysis}\n--- 单篇风格分析 ${index + 1} 结束 ---`
+      ),
+    ].join('\n'),
     maxOutputTokens: 12000,
     abortSignal: options.abortSignal,
     providerOptions: {

@@ -31,6 +31,10 @@ export type UploadedFileRecord = {
   extension: string;
   contentPath: string;
   createdAt: string;
+  sourceType?: 'system' | 'upload';
+  sourceKey?: string;
+  version?: number;
+  checksum?: string;
 };
 
 export function getContentPath(id: string, extension: string) {

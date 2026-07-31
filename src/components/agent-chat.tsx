@@ -18,6 +18,7 @@ import { FormEvent, useEffect, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
+import { StyleReferenceSelection } from "@/components/style-reference-selection"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -40,6 +41,7 @@ import { Toaster, toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import type { AssistantAgentUIMessage } from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
+import type { DocumentMaterial } from "@/lib/document-material"
 
 const resourceStorageKey = "document-agent-resource-id"
 
@@ -167,9 +169,12 @@ export function AgentChat() {
   const handledStyleAnalysisToolsRef = useRef(new Set<string>())
   const autoContinuedToolCallsRef = useRef(new Set<string>())
   const resumedOutlineToolsRef = useRef(new Set<string>())
+  const resumedStyleReferenceToolsRef = useRef(new Set<string>())
   const [resumedOutlineToolIds, setResumedOutlineToolIds] = useState<Set<string>>(
     () => new Set()
   )
+  const [resumedStyleReferenceToolIds, setResumedStyleReferenceToolIds] =
+    useState<Set<string>>(() => new Set())
   const {
     applyLocalEdit,
     hasDocument,
@@ -1100,6 +1105,64 @@ export function AgentChat() {
                                             runId: data.runId,
                                             resumeData: {
                                               outline: editedOutline,
+                                            },
+                                          },
+                                        })
+                                      }}
+                                    />
+                                  )
+                                })}
+                                {message.parts.map((part) => {
+                                  if (part.type !== "data-tool-call-suspended") {
+                                    return null
+                                  }
+
+                                  const data = part.data
+                                  const isStyleProfileWorkflow =
+                                    data.toolName ===
+                                      "workflow-buildStyleProfileWorkflow" ||
+                                    data.toolName === "buildStyleProfileWorkflow"
+
+                                  if (
+                                    !isStyleProfileWorkflow ||
+                                    resumedStyleReferenceToolIds.has(data.toolCallId) ||
+                                    data.suspendPayload?.type !==
+                                      "style-reference-selection"
+                                  ) {
+                                    return null
+                                  }
+
+                                  return (
+                                    <StyleReferenceSelection
+                                      key={part.id ?? data.toolCallId}
+                                      payload={data.suspendPayload}
+                                      onPreview={(material: DocumentMaterial) =>
+                                        void handlePreview(material)
+                                      }
+                                      onConfirm={(
+                                        selectedDocumentIds,
+                                        additionalCandidates
+                                      ) => {
+                                        if (
+                                          resumedStyleReferenceToolsRef.current.has(
+                                            data.toolCallId
+                                          )
+                                        ) {
+                                          return
+                                        }
+
+                                        resumedStyleReferenceToolsRef.current.add(
+                                          data.toolCallId
+                                        )
+                                        setResumedStyleReferenceToolIds((current) =>
+                                          new Set(current).add(data.toolCallId)
+                                        )
+                                        void sendMessage(undefined, {
+                                          body: {
+                                            runId: data.runId,
+                                            resumeData: {
+                                              selectedDocumentIds,
+                                              additionalCandidates,
                                             },
                                           },
                                         })

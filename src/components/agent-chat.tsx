@@ -2,6 +2,7 @@
 
 import {
   DefaultChatTransport,
+  isToolUIPart,
   type FileUIPart,
 } from "ai"
 import { useChat } from "@ai-sdk/react"
@@ -76,6 +77,25 @@ function getBrowserResourceId() {
   }
 }
 
+function lastStepHasClientToolOutput(messages: AssistantAgentUIMessage[]) {
+  const lastMessage = messages.at(-1)
+
+  if (!lastMessage || lastMessage.role !== "assistant") {
+    return false
+  }
+
+  const lastStepStartIndex = lastMessage.parts.findLastIndex(
+    (part) => part.type === "step-start"
+  )
+
+  return lastMessage.parts.slice(lastStepStartIndex + 1).some(
+    (part) =>
+      isToolUIPart(part) &&
+      !part.providerExecuted &&
+      (part.state === "output-available" || part.state === "output-error")
+  )
+}
+
 const transport = new DefaultChatTransport<AssistantAgentUIMessage>({
   api: "/api/chat",
   prepareSendMessagesRequest: ({
@@ -84,18 +104,27 @@ const transport = new DefaultChatTransport<AssistantAgentUIMessage>({
     messageId,
     messages,
     trigger,
-  }) => ({
-    body: {
-      ...body,
-      messages,
-      trigger,
-      messageId,
-      memory: {
-        thread: `chat-${id}`,
-        resource: getBrowserResourceId(),
+  }) => {
+    const requestBody = { ...body }
+
+    if (lastStepHasClientToolOutput(messages)) {
+      delete requestBody.runId
+      delete requestBody.resumeData
+    }
+
+    return {
+      body: {
+        ...requestBody,
+        messages,
+        trigger,
+        messageId,
+        memory: {
+          thread: `chat-${id}`,
+          resource: getBrowserResourceId(),
+        },
       },
-    },
-  }),
+    }
+  },
 })
 
 const selectionContextPattern = /<document_selection>([\s\S]*?)<\/document_selection>\s*/
@@ -198,77 +227,76 @@ export function AgentChat() {
           return
         }
 
-        setTimeout(async () => {
-          try {
-            switch (toolCall.toolName) {
-              case "getDocumentSnapshot": {
-                const snapshot = readDocument()
-  
-                if (!snapshot) {
-                  throw new Error("编辑器尚未准备好，无法读取当前文档")
-                }
-  
-                addToolOutput({
-                  tool: "getDocumentSnapshot",
-                  toolCallId: toolCall.toolCallId,
-                  output: snapshot,
-                })
-                return
+        try {
+          switch (toolCall.toolName) {
+            case "getDocumentSnapshot": {
+              const snapshot = readDocument()
+
+              if (!snapshot) {
+                throw new Error("编辑器尚未准备好，无法读取当前文档")
               }
-              case "streamDocumentToPlate": {
-                await streamDocument(toolCall.toolCallId, toolCall.input)
-  
-                addToolOutput({
-                  tool: "streamDocumentToPlate",
-                  toolCallId: toolCall.toolCallId,
-                  output: { success: true },
-                })
-                return
-              }
-              case "writeMarkdownToPlate": {
-                await writePreparedMarkdown(
-                  toolCall.toolCallId,
-                  toolCall.input.markdown
-                )
-  
-                addToolOutput({
-                  tool: "writeMarkdownToPlate",
-                  toolCallId: toolCall.toolCallId,
-                  output: { success: true },
-                })
-                return
-              }
-              case "applyLocalEdit":
-                addToolOutput({
-                  tool: "applyLocalEdit",
-                  toolCallId: toolCall.toolCallId,
-                  output: applyLocalEdit(toolCall.input),
-                })
-                return
+
+              addToolOutput({
+                tool: "getDocumentSnapshot",
+                toolCallId: toolCall.toolCallId,
+                output: snapshot,
+              })
+              return
             }
-          } catch (toolError) {
-            const errorText =
-              toolError instanceof DOMException && toolError.name === "AbortError"
-                ? "用户已停止文档生成"
-                : toolError instanceof Error
-                  ? toolError.message
-                  : String(toolError)
-  
-            switch (toolCall.toolName) {
-              case "getDocumentSnapshot":
-              case "streamDocumentToPlate":
-              case "writeMarkdownToPlate":
-              case "applyLocalEdit": {
-                addToolOutput({
-                  tool: toolCall.toolName,
-                  toolCallId: toolCall.toolCallId,
-                  state: "output-error",
-                  errorText,
-                })
-                return
-              }
+            case "streamDocumentToPlate": {
+              await streamDocument(toolCall.toolCallId, toolCall.input)
+
+              addToolOutput({
+                tool: "streamDocumentToPlate",
+                toolCallId: toolCall.toolCallId,
+                output: { success: true },
+              })
+              return
             }
-          }}, 1000)
+            case "writeMarkdownToPlate": {
+              await writePreparedMarkdown(
+                toolCall.toolCallId,
+                toolCall.input.markdown
+              )
+
+              addToolOutput({
+                tool: "writeMarkdownToPlate",
+                toolCallId: toolCall.toolCallId,
+                output: { success: true },
+              })
+              return
+            }
+            case "applyLocalEdit":
+              addToolOutput({
+                tool: "applyLocalEdit",
+                toolCallId: toolCall.toolCallId,
+                output: applyLocalEdit(toolCall.input),
+              })
+              return
+          }
+        } catch (toolError) {
+          const errorText =
+            toolError instanceof DOMException && toolError.name === "AbortError"
+              ? "用户已停止文档生成"
+              : toolError instanceof Error
+                ? toolError.message
+                : String(toolError)
+
+          switch (toolCall.toolName) {
+            case "getDocumentSnapshot":
+            case "streamDocumentToPlate":
+            case "writeMarkdownToPlate":
+            case "applyLocalEdit": {
+              addToolOutput({
+                tool: toolCall.toolName,
+                toolCallId: toolCall.toolCallId,
+                state: "output-error",
+                errorText,
+              })
+              return
+            }
+          }
+        }
       },
       sendAutomaticallyWhen: shouldContinueAfterToolCalls,
     })

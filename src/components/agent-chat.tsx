@@ -454,8 +454,30 @@ export function AgentChat() {
     void sendMessage({ text: prompt })
   }
 
+  const selectedReferencePreview = selectedReference && (
+    <div className="mb-2 flex w-full items-start gap-2 rounded-lg border bg-muted/50 p-2.5 text-sm">
+      <MessageSquareQuote className="mt-0.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">已选中的文档内容</p>
+        <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-muted-foreground">
+          {selectedReference}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="移除选中内容"
+        onClick={() => setSelectedReference(null)}
+      >
+        <X />
+      </Button>
+    </div>
+  )
+
   const composer = (
     <div className="w-full">
+      {selectedReferencePreview}
       <form onSubmit={handleSubmit}>
         <div
           className={cn(
@@ -1201,27 +1223,7 @@ export function AgentChat() {
 
           {messages.length > 0 && (
             <footer className="shrink-0 pb-6 pt-3">
-            {selectedReference && (
-              <div className="mb-2 flex w-full items-start gap-2 rounded-lg border bg-muted/50 p-2.5 text-sm">
-            <MessageSquareQuote className="mt-0.5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">已选中的文档内容</p>
-              <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-muted-foreground">
-                {selectedReference}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="移除选中内容"
-              onClick={() => setSelectedReference(null)}
-            >
-              <X />
-            </Button>
-              </div>
-            )}
-            {composer}
+              {composer}
             </footer>
           )}
         </div>

@@ -477,6 +477,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
               variant="fullWidth"
               placeholder="开始输入文档内容…"
               disabled={isDocumentStreaming}
+              readOnly={isDocumentStreaming}
             />
           </div>
         </EditorContainer>

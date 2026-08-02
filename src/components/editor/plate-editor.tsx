@@ -73,6 +73,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
     isDocumentStreaming,
     registerDocumentImporter,
     registerDocumentReader,
+    registerDocumentRestorer,
     registerDocumentStreamController,
     registerLocalEditApplier,
   } = useDocumentEditor();
@@ -269,20 +270,38 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
     const unregisterReader = registerDocumentReader(() => ({
       blocks: collectBlocks(editor.children as Descendant[]),
+      filename,
       markdown: editor
         .getApi(MarkdownPlugin)
         .markdown.serialize({ value: editor.children as Descendant[] }),
     }));
+
+    return unregisterReader;
+  }, [editor, filename, registerDocumentReader]);
+
+  useEffect(() => {
+    const unregisterRestorer = registerDocumentRestorer((snapshot) => {
+      const nodes = editor
+        .getApi(MarkdownPlugin)
+        .markdown.deserialize(snapshot.markdown) as Value;
+
+      editor.tf.setValue(nodes.length > 0 ? nodes : structuredClone(value));
+      setFilename(snapshot.filename);
+    });
 
     const unregisterApplier = registerLocalEditApplier(
       createLocalEditApplier(editor)
     );
 
     return () => {
-      unregisterReader();
+      unregisterRestorer();
       unregisterApplier();
     };
-  }, [editor, registerDocumentReader, registerLocalEditApplier]);
+  }, [
+    editor,
+    registerDocumentRestorer,
+    registerLocalEditApplier,
+  ]);
 
   const importDocument = useCallback(async (file: File) => {
     const extension = file.name.split('.').pop()?.toLowerCase();

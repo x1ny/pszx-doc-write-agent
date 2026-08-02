@@ -27,7 +27,13 @@ export type DocumentBlock = {
 
 export type DocumentSnapshot = {
   blocks: DocumentBlock[]
+  filename: string
   markdown?: string
+}
+
+export type RestorableDocumentSnapshot = {
+  filename: string
+  markdown: string
 }
 
 export type LocalEdit = {
@@ -38,6 +44,7 @@ export type LocalEdit = {
 }
 
 type DocumentReader = () => DocumentSnapshot
+type DocumentRestorer = (snapshot: RestorableDocumentSnapshot) => void
 type LocalEditApplier = (edit: LocalEdit) => {
   success: boolean
   message?: string
@@ -62,6 +69,8 @@ type DocumentEditorContextValue = {
   appendToPrompt: (text: string) => void
   registerDocumentReader: (reader: DocumentReader) => () => void
   readDocument: () => DocumentSnapshot | null
+  registerDocumentRestorer: (restorer: DocumentRestorer) => () => void
+  restoreDocument: (snapshot: RestorableDocumentSnapshot) => void
   registerLocalEditApplier: (applier: LocalEditApplier) => () => void
   applyLocalEdit: (edit: LocalEdit) => { success: boolean; message?: string }
 }
@@ -80,6 +89,7 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
   const documentImporterRef = useRef<DocumentImporter | null>(null)
   const promptAppenderRef = useRef<PromptAppender | null>(null)
   const documentReaderRef = useRef<DocumentReader | null>(null)
+  const documentRestorerRef = useRef<DocumentRestorer | null>(null)
   const localEditApplierRef = useRef<LocalEditApplier | null>(null)
 
   const registerDocumentStreamController = useCallback(
@@ -227,6 +237,30 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
     return documentReaderRef.current?.() ?? null
   }, [])
 
+  const registerDocumentRestorer = useCallback((restorer: DocumentRestorer) => {
+    documentRestorerRef.current = restorer
+
+    return () => {
+      if (documentRestorerRef.current === restorer) {
+        documentRestorerRef.current = null
+      }
+    }
+  }, [])
+
+  const restoreDocument = useCallback((snapshot: RestorableDocumentSnapshot) => {
+    if (activeDocumentStreamIdRef.current) {
+      throw new Error("文档正在流式写入，请先停止生成")
+    }
+
+    const restorer = documentRestorerRef.current
+
+    if (!restorer) {
+      throw new Error("编辑器尚未准备好")
+    }
+
+    restorer(snapshot)
+  }, [])
+
   const registerLocalEditApplier = useCallback((applier: LocalEditApplier) => {
     localEditApplierRef.current = applier
 
@@ -272,6 +306,8 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
         appendToPrompt,
         registerDocumentReader,
         readDocument,
+        registerDocumentRestorer,
+        restoreDocument,
         registerLocalEditApplier,
         applyLocalEdit,
       }}

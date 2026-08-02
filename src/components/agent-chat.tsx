@@ -23,6 +23,10 @@ import { FormEvent, useEffect, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
+import {
+  DocumentSnapshotCard,
+  type SavedDocumentSnapshot,
+} from "@/components/document-snapshot-card"
 import { DocumentWriteProgress } from "@/components/document-write-progress"
 import { StyleReferenceSelection } from "@/components/style-reference-selection"
 import { StyleProfileProgress } from "@/components/style-profile-progress"
@@ -35,7 +39,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useDocumentEditor } from "@/components/editor/document-editor-context"
+import {
+  useDocumentEditor,
+  type DocumentSnapshot,
+} from "@/components/editor/document-editor-context"
 import { useDocumentWriteStream } from "@/components/editor/use-document-write-stream"
 import {
   MessageScroller,
@@ -145,6 +152,19 @@ type FileStatus = {
   message: string
 }
 
+type ActiveDocumentRound = {
+  didMutateDocument: boolean
+  initialFilename: string
+  initialMarkdown: string
+}
+
+function getComparableDocument(snapshot: DocumentSnapshot | null) {
+  return {
+    filename: snapshot?.filename ?? "",
+    markdown: snapshot?.markdown ?? "",
+  }
+}
+
 function parseOutlineInput(input: unknown) {
   if (typeof input === "string") {
     try {
@@ -183,10 +203,14 @@ export function AgentChat() {
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null)
   const [previewContent, setPreviewContent] = useState("")
   const [previewStatus, setPreviewStatus] = useState<FileStatus | null>(null)
+  const [savedDocumentSnapshots, setSavedDocumentSnapshots] = useState<
+    Record<string, SavedDocumentSnapshot>
+  >({})
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadFileInputRef = useRef<HTMLInputElement>(null)
   const wasBusyRef = useRef(false)
+  const activeDocumentRoundRef = useRef<ActiveDocumentRound | null>(null)
   const resumedOutlineToolsRef = useRef(new Set<string>())
   const resumedStyleReferenceToolsRef = useRef(new Set<string>())
   const [resumedOutlineToolIds, setResumedOutlineToolIds] = useState<Set<string>>(
@@ -202,6 +226,7 @@ export function AgentChat() {
     readDocument,
     registerPromptAppender,
     revealEditor,
+    restoreDocument,
   } = useDocumentEditor()
   const {
     isDocumentStreaming,
@@ -209,6 +234,22 @@ export function AgentChat() {
     streamDocument,
     writePreparedMarkdown,
   } = useDocumentWriteStream()
+
+  function beginDocumentRound() {
+    const initialDocument = getComparableDocument(readDocument())
+
+    activeDocumentRoundRef.current = {
+      didMutateDocument: false,
+      initialFilename: initialDocument.filename,
+      initialMarkdown: initialDocument.markdown,
+    }
+  }
+
+  function markDocumentMutationSucceeded() {
+    if (activeDocumentRoundRef.current) {
+      activeDocumentRoundRef.current.didMutateDocument = true
+    }
+  }
 
   const { messages, sendMessage, addToolOutput, stop, status, error } =
     useChat<AssistantAgentUIMessage>({
@@ -239,12 +280,16 @@ export function AgentChat() {
               addToolOutput({
                 tool: "getDocumentSnapshot",
                 toolCallId: toolCall.toolCallId,
-                output: snapshot,
+                output: {
+                  blocks: snapshot.blocks,
+                  markdown: snapshot.markdown,
+                },
               })
               return
             }
             case "streamDocumentToPlate": {
               await streamDocument(toolCall.toolCallId, toolCall.input)
+              markDocumentMutationSucceeded()
 
               addToolOutput({
                 tool: "streamDocumentToPlate",
@@ -258,6 +303,7 @@ export function AgentChat() {
                 toolCall.toolCallId,
                 toolCall.input.markdown
               )
+              markDocumentMutationSucceeded()
 
               addToolOutput({
                 tool: "writeMarkdownToPlate",
@@ -266,13 +312,20 @@ export function AgentChat() {
               })
               return
             }
-            case "applyLocalEdit":
+            case "applyLocalEdit": {
+              const output = applyLocalEdit(toolCall.input)
+
+              if (output.success) {
+                markDocumentMutationSucceeded()
+              }
+
               addToolOutput({
                 tool: "applyLocalEdit",
                 toolCallId: toolCall.toolCallId,
-                output: applyLocalEdit(toolCall.input),
+                output,
               })
               return
+            }
           }
         } catch (toolError) {
           const errorText =
@@ -298,12 +351,71 @@ export function AgentChat() {
           }
         }
       },
+      onFinish({
+        finishReason,
+        isAbort,
+        isDisconnect,
+        isError,
+        message,
+        messages: finishedMessages,
+      }) {
+        if (shouldContinueAfterToolCalls({ messages: finishedMessages })) {
+          return
+        }
+
+        const activeRound = activeDocumentRoundRef.current
+        activeDocumentRoundRef.current = null
+
+        if (
+          !activeRound?.didMutateDocument ||
+          isAbort ||
+          isDisconnect ||
+          isError ||
+          finishReason === "error"
+        ) {
+          return
+        }
+
+        const finalDocument = readDocument()
+
+        if (!finalDocument) {
+          return
+        }
+
+        const finalState = getComparableDocument(finalDocument)
+
+        if (
+          finalState.filename === activeRound.initialFilename &&
+          finalState.markdown === activeRound.initialMarkdown
+        ) {
+          return
+        }
+
+        const savedSnapshot: SavedDocumentSnapshot = {
+          createdAt: new Date().toISOString(),
+          filename: finalState.filename,
+          id: message.id,
+          markdown: finalState.markdown,
+        }
+
+        setSavedDocumentSnapshots((current) => {
+          if (current[message.id]) {
+            return current
+          }
+
+          return {
+            ...current,
+            [message.id]: savedSnapshot,
+          }
+        })
+      },
       sendAutomaticallyWhen: shouldContinueAfterToolCalls,
     })
   const isChatBusy = status === "submitted" || status === "streaming"
   const isBusy = isChatBusy || isDocumentStreaming
 
   function handleStop() {
+    activeDocumentRoundRef.current = null
     stopDocumentWrite()
 
     if (isChatBusy) {
@@ -352,6 +464,8 @@ export function AgentChat() {
       mediaType: file.mimeType,
       filename: file.originalName,
     }))
+
+    beginDocumentRound()
 
     await sendMessage({
       text: messageText || "请阅读我上传的文件。",
@@ -479,7 +593,35 @@ export function AgentChat() {
     }
 
     setInput("")
+    beginDocumentRound()
     void sendMessage({ text: prompt })
+  }
+
+  function handleRestoreDocumentSnapshot(snapshot: SavedDocumentSnapshot) {
+    try {
+      restoreDocument({
+        filename: snapshot.filename,
+        markdown: snapshot.markdown,
+      })
+      revealEditor()
+      toast.add({
+        type: "success",
+        title: "已恢复该文档版本",
+        timeout: 3000,
+      })
+      return true
+    } catch (restoreError) {
+      toast.add({
+        type: "error",
+        title: "恢复文档版本失败",
+        description:
+          restoreError instanceof Error
+            ? restoreError.message
+            : "编辑器暂时无法恢复该文档版本",
+        timeout: 5000,
+      })
+      return false
+    }
   }
 
   const selectedReferencePreview = selectedReference && (
@@ -1151,6 +1293,7 @@ export function AgentChat() {
                                         setResumedOutlineToolIds((current) =>
                                           new Set(current).add(data.toolCallId)
                                         )
+                                        beginDocumentRound()
                                         void sendMessage(undefined, {
                                           body: {
                                             runId: data.runId,
@@ -1208,6 +1351,7 @@ export function AgentChat() {
                                         setResumedStyleReferenceToolIds((current) =>
                                           new Set(current).add(data.toolCallId)
                                         )
+                                        beginDocumentRound()
                                         void sendMessage(undefined, {
                                           body: {
                                             runId: data.runId,
@@ -1221,6 +1365,12 @@ export function AgentChat() {
                                     />
                                   )
                                 })}
+                                {savedDocumentSnapshots[message.id] && (
+                                  <DocumentSnapshotCard
+                                    snapshot={savedDocumentSnapshots[message.id]}
+                                    onRestore={handleRestoreDocumentSnapshot}
+                                  />
+                                )}
                               </>
                             )}
                           </div>

@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ChevronDown,
   Code2,
   FileDown,
   FilePlus2,
+  FileText,
   FileUp,
   Highlighter,
   Loader2,
@@ -33,18 +35,30 @@ import {
 import { Plate, useEditorRef, usePlateEditor } from 'platejs/react';
 
 import { createLocalEditApplier } from '@/components/editor/local-edit';
+import { OfficialDocumentExportDialog } from '@/components/editor/official-document-export-dialog';
 import { BasicNodesKit } from '@/components/editor/plugins/basic-nodes-kit';
 import { Editor, EditorContainer } from '@/components/ui/editor';
 import { FloatingToolbar } from '@/components/ui/floating-toolbar';
 import { MarkToolbarButton } from '@/components/ui/mark-toolbar-button';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '@/components/ui/toolbar';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
 import {
   useDocumentEditor,
   type DocumentBlock,
   type DocumentStreamController,
 } from '@/components/editor/document-editor-context';
+import {
+  validateAndExtractOfficialDocumentBody,
+  type OfficialDocumentValidationResult,
+} from '@/lib/official-document';
 
 type ActiveDocumentStream = {
   operationId: string;
@@ -76,6 +90,9 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
   const [filename, setFilename] = useState('未命名文档');
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isOfficialExportOpen, setIsOfficialExportOpen] = useState(false);
+  const [officialDocumentValidation, setOfficialDocumentValidation] =
+    useState<OfficialDocumentValidationResult | null>(null);
   const [showSelectionToolbar, setShowSelectionToolbar] = useState(true);
   const activeDocumentStreamRef = useRef<ActiveDocumentStream | null>(null);
 
@@ -332,6 +349,15 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
     }
   }
 
+  function handleOfficialDocumentExport() {
+    setOfficialDocumentValidation(
+      validateAndExtractOfficialDocumentBody(
+        editor.children as Descendant[]
+      )
+    );
+    setIsOfficialExportOpen(true);
+  }
+
   function handleNew() {
     editor.tf.setValue(value);
     setFilename('未命名文档');
@@ -396,14 +422,35 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
             {isImporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <FileUp data-icon="inline-start" />}
             导入
           </Button>
-          <Button
-            size="sm"
-            onClick={() => void handleExport()}
-            disabled={isExporting || isDocumentStreaming}
-          >
-            {isExporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <FileDown data-icon="inline-start" />}
-            导出 DOCX
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button size="sm" />}
+              openOnHover
+              delay={80}
+              closeDelay={150}
+              disabled={isExporting || isDocumentStreaming}
+            >
+              {isExporting ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <FileDown data-icon="inline-start" />
+              )}
+              导出
+              <ChevronDown data-icon="inline-end" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => void handleExport()}>
+                  <FileDown />
+                  普通 DOCX 文件
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleOfficialDocumentExport}>
+                  <FileText />
+                  红头文件
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {onClose && (
             <Button
               variant="ghost"
@@ -449,6 +496,12 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
           </div>
         </EditorContainer>
       </Plate>
+      <OfficialDocumentExportDialog
+        filename={filename}
+        open={isOfficialExportOpen}
+        validation={officialDocumentValidation}
+        onOpenChange={setIsOfficialExportOpen}
+      />
     </section>
   );
 }

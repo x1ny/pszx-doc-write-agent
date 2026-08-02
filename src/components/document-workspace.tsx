@@ -59,7 +59,7 @@ export function DocumentWorkspace() {
     <main
       ref={workspaceRef}
       className={cn(
-        "flex h-svh w-full overflow-hidden bg-background",
+        "isolate flex h-svh w-full overflow-hidden bg-background",
         isResizing && "select-none"
       )}
     >

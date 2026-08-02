@@ -637,18 +637,21 @@ export function AgentChat() {
                       </p>
                     </div>
                     <div className="flex w-full max-w-2xl flex-wrap justify-center gap-2.5">
-                      {["请帮我写一篇公文：关于推动人工智能发展的建议"].map(
-                        (prompt) => (
+                      {[{
+                        label: '写一篇农村集体“三资”管理专项整治工作要求的公文',
+                        prompt: '请根据福建省农村集体“三资”管理专项整治工作要求，结合泉州市实际，起草一份《泉州市农业农村局关于开展农村集体“三资”管理突出问题专项排查整治的通知》',
+                      }].map(
+                        (item) => (
                           <Button
-                            key={prompt}
+                            key={item.label}
                             type="button"
                             variant="secondary"
                             size="sm"
                             disabled={isBusy}
-                            onClick={() => handleSuggestedPrompt(prompt)}
+                            onClick={() => handleSuggestedPrompt(item.prompt)}
                             className="h-auto rounded-full border-0 bg-[#f3f4f6] px-4 py-2.5 text-left text-sm font-normal leading-snug text-[#646a73] hover:bg-[#e8eaed] hover:text-[#1f2329]"
                           >
-                            {prompt}
+                            {item.label}
                           </Button>
                         )
                       )}

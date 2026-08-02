@@ -1,11 +1,12 @@
-import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createAlibaba } from '@ai-sdk/alibaba';
 import { generateText, Output } from 'ai';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
-const deepseek = createDeepSeek({
-  apiKey: process.env.DEEPSEEK_API_KEY ?? '',
-  baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
+const alibaba = createAlibaba({
+  apiKey: process.env.DASHSCOPE_API_KEY || process.env.DEEPSEEK_API_KEY || '',
+  baseURL:
+    process.env.DASHSCOPE_BASE_URL || process.env.DEEPSEEK_BASE_URL || undefined,
 });
 
 const documentDataReplacementSchema = z.object({
@@ -65,7 +66,7 @@ export const simulateDocumentDataRefresh = createTool({
     await waitForDataRefreshSimulation(650);
 
     const { output } = await generateText({
-      model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
+      model: alibaba(process.env.QWEN_MODEL || 'qwen3.6-flash'),
       system: `你是公文数据更新知识库引擎。
 
 请根据输入的完整 Markdown 公文，识别与业务语义直接相关、可以更新到目标年份的数据，例如数量、金额、面积、比例、增长率、项目数和业务时间节点。为这些数据生成合理的新年度数据，并同步更新相关年份表述。
@@ -82,8 +83,8 @@ export const simulateDocumentDataRefresh = createTool({
       prompt: documentMarkdown,
       maxOutputTokens: 8000,
       providerOptions: {
-        deepseek: {
-          thinking: { type: 'disabled' },
+        alibaba: {
+          enableThinking: false,
         },
       },
       output: Output.object({

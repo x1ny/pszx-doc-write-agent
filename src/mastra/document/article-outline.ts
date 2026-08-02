@@ -1,13 +1,14 @@
-import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createAlibaba } from '@ai-sdk/alibaba';
 import { Output, streamText } from 'ai';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
 import { outlineSchema, type ArticleOutline } from '@/lib/article-schema';
 
-const deepseek = createDeepSeek({
-  apiKey: process.env.DEEPSEEK_API_KEY ?? '',
-  baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
+const alibaba = createAlibaba({
+  apiKey: process.env.DASHSCOPE_API_KEY || process.env.DEEPSEEK_API_KEY || '',
+  baseURL:
+    process.env.DASHSCOPE_BASE_URL || process.env.DEEPSEEK_BASE_URL || undefined,
 });
 
 function normalizeOutlineProgress(value: unknown): ArticleOutline {
@@ -77,7 +78,7 @@ export const proposeArticleOutline = createTool({
       context.agent?.toolCallId ?? `outline-${Date.now()}`
     );
     const stream = streamText({
-      model: deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
+      model: alibaba(process.env.QWEN_MODEL || 'qwen3.6-flash'),
       system:
         '你是公文写作规划助手。请根据用户需求生成结构清晰、内容具体的公文大纲。只输出符合给定结构的大纲对象，不要输出 Markdown、解释文字或代码块。大纲应包含标题、摘要和多个章节，每个章节包含写作目的和关键要点。',
       prompt: description,
@@ -88,8 +89,8 @@ export const proposeArticleOutline = createTool({
         schema: outlineSchema,
       }),
       providerOptions: {
-        deepseek: {
-          thinking: { type: 'disabled' },
+        alibaba: {
+          enableThinking: false,
         },
       },
     });

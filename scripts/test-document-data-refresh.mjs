@@ -187,8 +187,8 @@ for (const requiredToolName of requiredToolNames) {
   }
 }
 
-if (!writtenMarkdown || writtenMarkdown === currentDocument.markdown) {
-  throw new Error('模拟编辑器没有收到更新后的 Markdown。');
+if (!writtenMarkdown || !writtenMarkdown.includes('2025')) {
+  throw new Error('模拟编辑器没有收到包含目标年份的更新 Markdown。');
 }
 
 const forbiddenPhrases = ['模拟', '演示', '虚构', '假设', '如有实际数据'];

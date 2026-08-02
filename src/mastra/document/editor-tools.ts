@@ -31,7 +31,7 @@ export const writeMarkdownToPlate = createTool({
 export const getDocumentSnapshot = createTool({
   id: 'getDocumentSnapshot',
   description:
-    '读取当前 Plate 编辑器的完整 Markdown 正文和文档结构。修改、润色或风格分析前必须先调用。',
+    '读取浏览器当前编辑器中的完整 Markdown 正文和文档结构。需要查找、修改、润色当前文档，或分析当前文档自身的写作风格时调用；指定人物的历史写作风格应先调用 workflow-buildStyleProfileWorkflow，本工具不负责生成或检索人物风格画像。',
   inputSchema: z.object({
     query: z.string().optional().describe('可选的检索关键词'),
   }),

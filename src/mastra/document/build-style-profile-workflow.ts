@@ -189,7 +189,7 @@ const synthesizeStyleReferences = createStep({
 export const buildStyleProfileWorkflow = createWorkflow({
   id: 'build-style-profile-workflow',
   description:
-    '根据指定人物或作者选择参考材料，逐篇分析并汇总为可迁移的 Markdown 写作风格总结。',
+    '当用户明确指定某位领导、作者或其他人物，要求分析、学习或模仿其写作风格，或按其风格改写文档时调用。工作流会检索该人物的参考文章、等待用户选择材料、逐篇分析并汇总为可迁移的 Markdown Style Profile；不要用当前待改写文档代替人物参考材料。',
   inputSchema: workflowInputSchema,
   outputSchema: finalOutputSchema,
 })

@@ -1,5 +1,7 @@
 # 写作风格画像 Workflow 设计
 
+> **架构修订提示（2026-08-02）**：本文把“用户选择参考材料”设计为 Workflow 内部的 `suspend/resume`，这个流程边界仍然成立，因为它能保证用户选择后从固定步骤继续分析。联调问题不是 suspension 本身，而是 AI SDK 在 Agent 恢复流结束后自动续传客户端工具结果时，继承了已经消费的 `runId` / `resumeData`。当前推荐继续把本 Workflow 注册为 Agent Workflow-as-Tool：Agent 直接调用，浏览器渲染挂起 UI 并恢复 Agent run，Mastra 自动继续原 Workflow。不要新增 `buildStyleProfileInteractively` 客户端门面，也不要让浏览器另起独立 Workflow。完整故障复盘、官方依据与迁移方案见 [`docs/agent-workflow-client-tool-continuation.md`](docs/agent-workflow-client-tool-continuation.md)。
+
 ## 1. 目标
 
 实现一个通用的 `buildStyleProfileWorkflow`，用于：
@@ -403,7 +405,17 @@ Mastra Workflow 支持在步骤中 suspend，并持久化当前 Workflow 状态�
 追加知识库材料
 ```
 
-点击“确认参考材料”后，前端直接 Resume Workflow。
+点击“确认参考材料”后，前端恢复承载该 Workflow 工具调用的 Agent run：
+
+```text
+tool-call-suspended
+  ↓ 用户确认
+agent.resumeStream(resumeData, { runId: agentRunId })
+  ↓
+Mastra Workflow-as-Tool 包装层恢复原 Workflow run
+```
+
+当前业务由 Agent 发起，并且 Workflow 完成后 Agent 还要继续展示或改写，所以前端不要另行调用独立 Workflow endpoint，也不要自行维护 `agentToolCallId ↔ workflowRunId`。只有当 Workflow 本身就是独立页面或后台任务的入口时，才直接 Resume Workflow。
 
 Resume 输入：
 
@@ -1125,17 +1137,17 @@ Workflow failed / 请求用户重新选择
 
 ### 用户关闭页面
 
-Workflow 必须可以通过：
+当前 Agent-as-entry 拓扑下，应用必须可以通过持久化的 Agent suspended run 重新发现并恢复运行，例如使用：
 
 ```text
-workflowRunId
+agentRunId + toolCallId + Mastra Storage
 ```
 
 继续恢复。
 
 不要依赖浏览器内存保存当前进度。
 
-Mastra Workflow 会持久化运行状态，并支持从 suspend 状态恢复；当前默认引擎也保持 suspend/resume 之间的 trace 连续性。
+Mastra Agent snapshot 负责恢复顶层工具循环，嵌套 Workflow snapshot 负责恢复原 Step；Workflow-as-Tool 包装层负责连接两者。只有 Workflow 作为独立应用入口时，页面才直接持有并恢复 `workflowRunId`。
 
 ---
 
@@ -1315,7 +1327,7 @@ buildStyleProfile(person)
              ┌────────────┼────────────┐
              ▼            ▼            ▼
      analyzeStyle     buildStyleProfile   rewriteDocument
-         Tool             Workflow             Tool
+         Tool        Workflow-as-Tool           Tool
                             │
                      search references
                             ↓
@@ -1323,7 +1335,9 @@ buildStyleProfile(person)
                             ↓
                          suspend
                             ↓
-                          resume
+                  browser resumes Agent run
+                            ↓
+               Mastra resumes nested Workflow
                             ↓
                       foreach analyze
                             ↓

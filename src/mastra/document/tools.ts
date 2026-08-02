@@ -12,8 +12,8 @@ import { analyzeStyleProfileTool } from './style-profile';
 // 这是 agent 与前端之间的组装边界，具体业务逻辑仍归属于各自的功能模块。
 export const clientTools = {
   writeMarkdownToPlate,
-  getDocumentSnapshot,
   applyLocalEdit,
+  getDocumentSnapshot,
 };
 
 export { applyLocalEdit, getDocumentSnapshot, writeMarkdownToPlate };

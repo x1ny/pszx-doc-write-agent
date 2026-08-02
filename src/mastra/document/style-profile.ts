@@ -1,4 +1,4 @@
-import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createAlibaba } from '@ai-sdk/alibaba';
 import { generateText } from 'ai';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -7,19 +7,22 @@ import { styleProfileSystemPrompt } from './style-profile-prompt';
 import { styleProfileSynthesisSystemPrompt } from './style-profile-synthesis-prompt';
 
 function createStyleProfileModel() {
-  const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+  const apiKey = (
+    process.env.DASHSCOPE_API_KEY || process.env.DEEPSEEK_API_KEY
+  )?.trim();
   if (!apiKey) {
     throw new Error(
-      '未找到 DEEPSEEK_API_KEY，请先在 .env.local 中配置模型访问密钥。'
+      '未找到 DASHSCOPE_API_KEY 或 DEEPSEEK_API_KEY，请先在 .env.local 中配置模型访问密钥。'
     );
   }
 
-  const deepseek = createDeepSeek({
+  const alibaba = createAlibaba({
     apiKey,
-    baseURL: process.env.DEEPSEEK_BASE_URL || undefined,
+    baseURL:
+      process.env.DASHSCOPE_BASE_URL || process.env.DEEPSEEK_BASE_URL || undefined,
   });
 
-  return deepseek(process.env.DEEPSEEK_MODEL || 'deepseek-chat');
+  return alibaba(process.env.QWEN_MODEL || 'qwen3.6-flash');
 }
 
 /**
@@ -48,8 +51,8 @@ ${normalizedArticle}
     maxOutputTokens: 12000,
     abortSignal: options.abortSignal,
     providerOptions: {
-      deepseek: {
-        thinking: { type: 'disabled' },
+      alibaba: {
+        enableThinking: false,
       },
     },
   });
@@ -83,8 +86,8 @@ export async function synthesizeStyleProfile(
     maxOutputTokens: 12000,
     abortSignal: options.abortSignal,
     providerOptions: {
-      deepseek: {
-        thinking: { type: 'disabled' },
+      alibaba: {
+        enableThinking: false,
       },
     },
   });

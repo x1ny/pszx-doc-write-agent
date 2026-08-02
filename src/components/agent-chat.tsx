@@ -1,6 +1,10 @@
 "use client"
 
-import { DefaultChatTransport, type FileUIPart } from "ai"
+import {
+  DefaultChatTransport,
+  lastAssistantMessageIsCompleteWithToolCalls,
+  type FileUIPart,
+} from "ai"
 import { useChat } from "@ai-sdk/react"
 import {
   AlertTriangle,
@@ -65,7 +69,7 @@ function getBrowserResourceId() {
   }
 }
 
-const transport = new DefaultChatTransport({
+const transport = new DefaultChatTransport<AssistantAgentUIMessage>({
   api: "/api/chat",
   prepareSendMessagesRequest: ({
     body,
@@ -103,23 +107,6 @@ type UploadedFile = {
 type FileStatus = {
   type: "success" | "error" | "loading"
   message: string
-}
-
-const clientToolPartTypes = new Set([
-  "tool-writeMarkdownToPlate",
-  "tool-getDocumentSnapshot",
-  "tool-applyLocalEdit",
-  "tool-simulateLeaderStyleAnalysis",
-])
-type AgentToolPart = Extract<
-  AssistantAgentUIMessage["parts"][number],
-  { type: `tool-${string}` }
->
-
-function isAgentToolPart(
-  part: AssistantAgentUIMessage["parts"][number]
-): part is AgentToolPart {
-  return part.type.startsWith("tool-")
 }
 
 function parseOutlineInput(input: unknown) {
@@ -164,10 +151,6 @@ export function AgentChat() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadFileInputRef = useRef<HTMLInputElement>(null)
   const wasBusyRef = useRef(false)
-  const handledMarkdownToolsRef = useRef(new Set<string>())
-  const streamedMarkdownRef = useRef(new Map<string, string>())
-  const handledStyleAnalysisToolsRef = useRef(new Set<string>())
-  const autoContinuedToolCallsRef = useRef(new Set<string>())
   const resumedOutlineToolsRef = useRef(new Set<string>())
   const resumedStyleReferenceToolsRef = useRef(new Set<string>())
   const [resumedOutlineToolIds, setResumedOutlineToolIds] = useState<Set<string>>(
@@ -186,55 +169,71 @@ export function AgentChat() {
     writeMarkdown,
   } = useDocumentEditor()
 
-  function shouldAutomaticallyContinue({
-    messages,
-  }: {
-    messages: AssistantAgentUIMessage[]
-  }) {
-    const lastMessage = messages.at(-1)
-
-    if (
-      !lastMessage ||
-      lastMessage.role !== "assistant" ||
-      lastMessage.parts.some(
-        (part) => part.type === "data-tool-call-suspended"
-      )
-    ) {
-      return false
-    }
-
-    const toolParts = lastMessage.parts.filter(isAgentToolPart)
-    const clientToolParts = toolParts.filter((part) =>
-      clientToolPartTypes.has(part.type)
-    )
-    const pendingClientToolParts = clientToolParts.filter(
-      (part) =>
-        part.state !== "output-available" && part.state !== "output-error"
-    )
-    const uncontinuedClientToolParts = clientToolParts.filter(
-      (part) => !autoContinuedToolCallsRef.current.has(part.toolCallId)
-    )
-
-    if (
-      toolParts.length === 0 ||
-      clientToolParts.length === 0 ||
-      pendingClientToolParts.length > 0 ||
-      uncontinuedClientToolParts.length === 0
-    ) {
-      return false
-    }
-
-    for (const part of uncontinuedClientToolParts) {
-      autoContinuedToolCallsRef.current.add(part.toolCallId)
-    }
-
-    return true
-  }
-
   const { messages, sendMessage, addToolOutput, status, error } =
     useChat<AssistantAgentUIMessage>({
       transport,
-      sendAutomaticallyWhen: shouldAutomaticallyContinue,
+      onToolCall({ toolCall }) {
+        if (toolCall.dynamic) {
+          return
+        }
+
+        if (
+          toolCall.toolName !== "getDocumentSnapshot" &&
+          toolCall.toolName !== "writeMarkdownToPlate" &&
+          toolCall.toolName !== "applyLocalEdit"
+        ) {
+          return
+        }
+
+        setTimeout(() => {
+          
+          try {
+            switch (toolCall.toolName) {
+              case "getDocumentSnapshot": {
+                const snapshot = readDocument()
+
+                if (!snapshot) {
+                  throw new Error("编辑器尚未准备好，无法读取当前文档")
+                }
+
+                addToolOutput({
+                  tool: "getDocumentSnapshot",
+                  toolCallId: toolCall.toolCallId,
+                  output: snapshot,
+                })
+                return
+              }
+              case "writeMarkdownToPlate":
+                revealEditor()
+                writeMarkdown(toolCall.input.markdown)
+                addToolOutput({
+                  tool: "writeMarkdownToPlate",
+                  toolCallId: toolCall.toolCallId,
+                  output: { success: true },
+                })
+                return
+              case "applyLocalEdit":
+                addToolOutput({
+                  tool: "applyLocalEdit",
+                  toolCallId: toolCall.toolCallId,
+                  output: applyLocalEdit(toolCall.input),
+                })
+                return
+            }
+          } catch (toolError) {
+            addToolOutput({
+              tool: toolCall.toolName,
+              toolCallId: toolCall.toolCallId,
+              state: "output-error",
+              errorText:
+                toolError instanceof Error ? toolError.message : String(toolError),
+            })
+          }
+
+        }, 1000)
+
+      },
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     })
   const isBusy = status === "submitted" || status === "streaming"
 
@@ -256,121 +255,6 @@ export function AgentChat() {
 
     wasBusyRef.current = isBusy
   }, [isBusy])
-
-  useEffect(() => {
-    for (const message of messages) {
-      for (const part of message.parts) {
-        if (part.type !== "tool-writeMarkdownToPlate") {
-          continue
-        }
-
-        // AI SDK 会先把工具参数以 input-streaming 状态逐步传到客户端。
-        // markdown 参数是累计值，因此可以直接用它刷新编辑器，让文档边生成边出现。
-        if (part.state === "input-streaming") {
-          const markdown = part.input?.markdown
-
-          if (
-            typeof markdown === "string" &&
-            markdown !== streamedMarkdownRef.current.get(part.toolCallId)
-          ) {
-            streamedMarkdownRef.current.set(part.toolCallId, markdown)
-            revealEditor()
-            writeMarkdown(markdown)
-          }
-
-          continue
-        }
-
-        if (
-          part.state !== "input-available" ||
-          handledMarkdownToolsRef.current.has(part.toolCallId)
-        ) {
-          continue
-        }
-
-        handledMarkdownToolsRef.current.add(part.toolCallId)
-        writeMarkdown(part.input.markdown)
-        revealEditor()
-        addToolOutput({
-          tool: "writeMarkdownToPlate",
-          toolCallId: part.toolCallId,
-          output: { success: true },
-        })
-      }
-    }
-  }, [addToolOutput, messages, revealEditor, writeMarkdown])
-
-  useEffect(() => {
-    for (const message of messages) {
-      for (const part of message.parts) {
-        if (
-          part.type !== "data-style-rewrite-result" ||
-          handledStyleAnalysisToolsRef.current.has(part.data.toolCallId)
-        ) {
-          continue
-        }
-
-        const toolCall = messages
-          .flatMap((currentMessage) => currentMessage.parts)
-          .find(
-            (candidate) =>
-              candidate.type === "tool-simulateLeaderStyleAnalysis" &&
-              candidate.toolCallId === part.data.toolCallId &&
-              candidate.state === "input-available"
-          )
-
-        if (!toolCall) {
-          continue
-        }
-
-        handledStyleAnalysisToolsRef.current.add(part.data.toolCallId)
-        addToolOutput({
-          tool: "simulateLeaderStyleAnalysis",
-          toolCallId: part.data.toolCallId,
-          output: part.data.output,
-        })
-      }
-    }
-  }, [addToolOutput, messages])
-
-  const handledDocumentToolsRef = useRef(new Set<string>())
-
-  useEffect(() => {
-    for (const message of messages) {
-      for (const part of message.parts) {
-        if (
-          (part.type !== "tool-getDocumentSnapshot" &&
-            part.type !== "tool-applyLocalEdit") ||
-          part.state !== "input-available" ||
-          handledDocumentToolsRef.current.has(part.toolCallId)
-        ) {
-          continue
-        }
-
-        handledDocumentToolsRef.current.add(part.toolCallId)
-
-        if (part.type === "tool-getDocumentSnapshot") {
-          const snapshot = readDocument()
-
-          addToolOutput({
-            tool: "getDocumentSnapshot",
-            toolCallId: part.toolCallId,
-            output: snapshot ?? { blocks: [] },
-          })
-        } else {
-          const result = part.input
-            ? applyLocalEdit(part.input)
-            : { success: false, message: "缺少局部修改参数" }
-
-          addToolOutput({
-            tool: "applyLocalEdit",
-            toolCallId: part.toolCallId,
-            output: result,
-          })
-        }
-      }
-    }
-  }, [addToolOutput, applyLocalEdit, messages, readDocument])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

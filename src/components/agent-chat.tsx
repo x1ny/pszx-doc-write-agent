@@ -22,6 +22,7 @@ import { FormEvent, useEffect, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
+import { DocumentWriteProgress } from "@/components/document-write-progress"
 import { StyleReferenceSelection } from "@/components/style-reference-selection"
 import { StyleProfileProgress } from "@/components/style-profile-progress"
 import { Button } from "@/components/ui/button"
@@ -822,6 +823,16 @@ export function AgentChat() {
                                     .join("")}
                                 </Streamdown>
                                 {message.parts.map((part, index) => {
+                                  if (part.type === "tool-streamDocumentToPlate") {
+                                    return (
+                                      <DocumentWriteProgress
+                                        key={part.toolCallId}
+                                        part={part}
+                                        isDocumentStreaming={isDocumentStreaming}
+                                      />
+                                    )
+                                  }
+
                                   if (part.type === "data-style-profile-progress") {
                                     const progressPartKey =
                                       part.id ??

@@ -23,6 +23,7 @@ import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
 import { StyleReferenceSelection } from "@/components/style-reference-selection"
+import { StyleProfileProgress } from "@/components/style-profile-progress"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -50,6 +51,7 @@ import {
 } from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
 import type { DocumentMaterial } from "@/lib/document-material"
+import type { StyleProfileProgressData } from "@/lib/style-profile-progress"
 
 const resourceStorageKey = "document-agent-resource-id"
 
@@ -661,6 +663,37 @@ export function AgentChat() {
                     const completedDataRefreshToolIds = new Set<string>()
                     const latestOutlineProgressPartKeys = new Map<string, string>()
                     const completedOutlineToolIds = new Set<string>()
+                    const styleProfileProgressByRunId = new Map<
+                      string,
+                      StyleProfileProgressData[]
+                    >()
+                    const firstStyleProfileProgressPartKeyByRunId = new Map<
+                      string,
+                      string
+                    >()
+
+                    message.parts.forEach((part, index) => {
+                      if (part.type !== "data-style-profile-progress") {
+                        return
+                      }
+
+                      const progressPartKey =
+                        part.id ?? `${message.id}-style-profile-progress-${index}`
+                      const events =
+                        styleProfileProgressByRunId.get(part.data.runId) ?? []
+
+                      events.push(part.data)
+                      styleProfileProgressByRunId.set(part.data.runId, events)
+
+                      if (
+                        !firstStyleProfileProgressPartKeyByRunId.has(part.data.runId)
+                      ) {
+                        firstStyleProfileProgressPartKeyByRunId.set(
+                          part.data.runId,
+                          progressPartKey
+                        )
+                      }
+                    })
 
                     message.parts.forEach((part, index) => {
                       if (
@@ -789,6 +822,31 @@ export function AgentChat() {
                                     .join("")}
                                 </Streamdown>
                                 {message.parts.map((part, index) => {
+                                  if (part.type === "data-style-profile-progress") {
+                                    const progressPartKey =
+                                      part.id ??
+                                      `${message.id}-style-profile-progress-${index}`
+
+                                    if (
+                                      firstStyleProfileProgressPartKeyByRunId.get(
+                                        part.data.runId
+                                      ) !== progressPartKey
+                                    ) {
+                                      return null
+                                    }
+
+                                    return (
+                                      <StyleProfileProgress
+                                        key={`style-profile-progress-${part.data.runId}`}
+                                        events={
+                                          styleProfileProgressByRunId.get(
+                                            part.data.runId
+                                          ) ?? []
+                                        }
+                                      />
+                                    )
+                                  }
+
                                   if (part.type === "data-outline-progress") {
                                     const data = part.data
                                     const progressPartKey =

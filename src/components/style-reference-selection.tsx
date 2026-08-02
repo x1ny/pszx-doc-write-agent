@@ -68,7 +68,7 @@ export function StyleReferenceSelection({
   }
 
   return (
-    <Card className="mt-4 w-full overflow-visible border border-border ring-0">
+    <Card className="mt-4 w-full min-w-[600px] overflow-visible border border-border ring-0">
       <CardHeader>
         <CardTitle>
           选择{payload.subject?.name ?? "该作者"}的参考材料

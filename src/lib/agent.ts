@@ -6,6 +6,7 @@ import {
 
 import type { DocumentMaterial } from '@/lib/document-material';
 import type { ArticleOutline } from '@/lib/article-schema';
+import type { StyleProfileProgressData } from '@/lib/style-profile-progress';
 import type {
   DocumentBlock,
   LocalEdit,
@@ -81,6 +82,7 @@ type AssistantAgentUITools = {
 };
 
 type AssistantAgentUIData = {
+  "style-profile-progress": StyleProfileProgressData;
   "outline-progress": {
     state: "data-outline-progress";
     toolCallId: string;

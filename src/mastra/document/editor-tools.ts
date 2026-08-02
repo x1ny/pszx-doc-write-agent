@@ -13,10 +13,18 @@ export const documentSnapshotSchema = z.object({
 });
 
 const localEditSchema = z.object({
-  path: z.array(z.number()).min(1),
-  expectedText: z.string().min(1),
-  targetText: z.string().min(1),
-  replacement: z.string().min(1),
+  path: z.array(z.number()).min(1).describe('快照中目标段落的 path'),
+  expectedText: z
+    .string()
+    .min(1)
+    .describe(
+      '用于定位的上下文原文，必须原样摘自最新快照对应段落的 text；可以是整段，也可以是包含 targetText 的一句话'
+    ),
+  targetText: z
+    .string()
+    .min(1)
+    .describe('expectedText 内部真正要被替换掉的那段文字'),
+  replacement: z.string().min(1).describe('用来替换 targetText 的新文字'),
 });
 
 export const writeMarkdownToPlate = createTool({
@@ -61,7 +69,8 @@ export const getDocumentSnapshot = createTool({
 
 export const applyLocalEdit = createTool({
   id: 'applyLocalEdit',
-  description: '基于文档快照对当前文档中的一个段落执行局部替换。expectedText 必须来自最新快照。',
+  description:
+    '基于文档快照对当前文档中的一个段落执行局部替换。expectedText 用于定位、targetText 是其中真正被替换掉的文字，两者都必须原样摘自最新快照。',
   inputSchema: localEditSchema,
   outputSchema: z.object({
     success: z.boolean(),

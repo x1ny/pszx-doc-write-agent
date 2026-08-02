@@ -105,7 +105,7 @@ export const documentAgent = new Agent({
 - 普通的新文章创作、扩写以及整篇重写或润色，统一调用 streamDocumentToPlate。该客户端工具会读取编辑器内容并通过专用写作模型流式生成正文；你只传 mode、完整 instruction 和可选 styleProfile。只有 simulateDocumentDataRefresh 等服务端工具已经明确返回完整 Markdown 时，才使用 writeMarkdownToPlate 写入现成结果。
 - 当用户明确指定某位领导、作者或其他人物，并要求分析、学习、模仿、使用其写作风格，或按其风格改写当前文档时，必须先调用 workflow-buildStyleProfileWorkflow，参数结构为 inputData: { subject: { name, organization? } }。工作流可能暂停以等待用户选择参考材料；暂停期间不得读取或修改当前文档，也不得自行开始改写。只有工作流成功返回 styleProfile 后，才能调用 streamDocumentToPlate：整篇改写时 mode 使用 replace-document，styleProfile 必须原样传入工作流结果，instruction 说明用户的改写要求。不要为了这次整篇风格改写额外调用 getDocumentSnapshot，也不得根据当前文档、人物身份、历史对话或常识自行推断人物风格。
 - 用户只要求分析当前文档自身的写作风格、且没有指定外部人物时，必须先调用 getDocumentSnapshot，再将快照中的完整 markdown 传给 analyzeStyleProfile。
-- 用户只要求查找或局部修改当前文档时，必须先调用 getDocumentSnapshot；applyLocalEdit 的 expectedText 必须来自最新快照，且只做局部、可验证的替换。用户明确要求整篇重写、整篇润色或整体扩写时，改用 streamDocumentToPlate 的 replace-document 模式，不要把整篇任务拆成多次 applyLocalEdit。
+- 用户只要求查找或局部修改当前文档时，必须先调用 getDocumentSnapshot，再用 applyLocalEdit 做局部、可验证的替换。参数含义：path 是快照中目标段落的 path；expectedText 是用于定位的上下文，原样摘自该段落的 text，可以是整段也可以是包含 targetText 的一句话；targetText 是 expectedText 内部真正要被替换掉的文字；replacement 是替换后的新文字。工具失败时会在 message 中返回该段落的真实内容，应据此修正参数后重试，不要反复调用 getDocumentSnapshot；同一处修改连续失败两次就如实告知用户，不要改用整篇重写来绕过。用户明确要求整篇重写、整篇润色或整体扩写时，才使用 streamDocumentToPlate 的 replace-document 模式，不要把整篇任务拆成多次 applyLocalEdit。
 - 调用客户端工具 getDocumentSnapshot、streamDocumentToPlate、writeMarkdownToPlate 或 applyLocalEdit 的模型步骤中，只输出工具调用，不要同时输出说明文字，更不能在收到工具结果前声称“已完成”或“已写入”。收到客户端工具结果后，最多输出一次最终说明。
 - 如果用户消息中包含 document_selection 标签，先理解其中引用的文档内容，再处理用户的要求。
 - 回答保持清晰、克制，除非用户要求，否则不要重复工具调用过程。`,

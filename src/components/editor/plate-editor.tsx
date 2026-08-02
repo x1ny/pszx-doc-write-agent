@@ -32,6 +32,7 @@ import {
 } from 'platejs';
 import { Plate, useEditorRef, usePlateEditor } from 'platejs/react';
 
+import { createLocalEditApplier } from '@/components/editor/local-edit';
 import { BasicNodesKit } from '@/components/editor/plugins/basic-nodes-kit';
 import { Editor, EditorContainer } from '@/components/ui/editor';
 import { FloatingToolbar } from '@/components/ui/floating-toolbar';
@@ -43,7 +44,6 @@ import {
   useDocumentEditor,
   type DocumentBlock,
   type DocumentStreamController,
-  type LocalEdit,
 } from '@/components/editor/document-editor-context';
 
 type ActiveDocumentStream = {
@@ -257,42 +257,9 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
         .markdown.serialize({ value: editor.children as Descendant[] }),
     }));
 
-    const unregisterApplier = registerLocalEditApplier((edit: LocalEdit) => {
-      const nodeEntry = editor.api.node(edit.path);
-      const node = nodeEntry?.[0];
-
-      if (!node || !('children' in node)) {
-        return { success: false, message: '找不到目标段落' };
-      }
-
-      const currentText = editor.api.string(edit.path);
-
-      if (currentText !== edit.expectedText) {
-        return { success: false, message: '目标内容已经发生变化，请重新检索' };
-      }
-
-      const targetStart = currentText.indexOf(edit.targetText);
-
-      if (targetStart < 0) {
-        return { success: false, message: '找不到要替换的目标文字' };
-      }
-
-      const points = Array.from(
-        editor.api.positions({ at: edit.path, unit: 'character' })
-      );
-      const start = points[targetStart];
-      const end = points[targetStart + edit.targetText.length];
-
-      if (!start || !end) {
-        return { success: false, message: '无法定位目标段落范围' };
-      }
-
-      editor.tf.select({ anchor: start, focus: end });
-      editor.tf.delete();
-      editor.tf.insertText(edit.replacement);
-
-      return { success: true };
-    });
+    const unregisterApplier = registerLocalEditApplier(
+      createLocalEditApplier(editor)
+    );
 
     return () => {
       unregisterReader();

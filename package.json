@@ -19,7 +19,8 @@
     "materials:test": "node scripts/test-document-materials.mjs",
     "agent:data-refresh-test": "node scripts/test-document-data-refresh.mjs",
     "agent:file-prompt-test": "node scripts/test-uploaded-file-prompt.mjs",
-    "agent:file-chat-test": "node scripts/test-uploaded-file-agent.mjs"
+    "agent:file-chat-test": "node scripts/test-uploaded-file-agent.mjs",
+    "editor:local-edit-test": "node scripts/test-local-edit.mjs"
   },
   "dependencies": {
     "@ai-sdk/alibaba": "^1.0.41",

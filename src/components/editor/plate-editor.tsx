@@ -17,9 +17,19 @@ import {
   X,
 } from 'lucide-react';
 import { importDocx, DocxExportPlugin } from '@platejs/docx-io';
+import { AI_PREVIEW_KEY, BaseAIPlugin } from '@platejs/ai';
+import {
+  AIChatPlugin,
+  AIPlugin,
+  streamInsertChunk,
+} from '@platejs/ai/react';
 import { MarkdownPlugin } from '@platejs/markdown';
-import { normalizeStaticValue, type Value } from 'platejs';
-import type { Descendant } from 'platejs';
+import {
+  normalizeStaticValue,
+  type Descendant,
+  type TRange,
+  type Value,
+} from 'platejs';
 import { Plate, useEditorRef, usePlateEditor } from 'platejs/react';
 
 import { BasicNodesKit } from '@/components/editor/plugins/basic-nodes-kit';
@@ -32,19 +42,34 @@ import { Separator } from '@/components/ui/separator';
 import {
   useDocumentEditor,
   type DocumentBlock,
+  type DocumentStreamController,
   type LocalEdit,
 } from '@/components/editor/document-editor-context';
+
+type ActiveDocumentStream = {
+  operationId: string;
+  originalSelection: TRange | null;
+  originalValue: Value;
+  hasContent: boolean;
+};
 
 export function PlateEditor({ onClose }: { onClose?: () => void }) {
   const {
     appendToPrompt,
+    isDocumentStreaming,
     registerDocumentImporter,
     registerDocumentReader,
+    registerDocumentStreamController,
     registerLocalEditApplier,
-    registerMarkdownWriter,
   } = useDocumentEditor();
   const editor = usePlateEditor({
-    plugins: [...BasicNodesKit, MarkdownPlugin, DocxExportPlugin],
+    plugins: [
+      ...BasicNodesKit,
+      MarkdownPlugin,
+      AIPlugin,
+      AIChatPlugin,
+      DocxExportPlugin,
+    ],
     value,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -52,61 +77,154 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showSelectionToolbar, setShowSelectionToolbar] = useState(true);
-  const pendingMarkdownRef = useRef<string | null>(null);
-  const lastWrittenMarkdownRef = useRef<string | null>(null);
-  const markdownWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeDocumentStreamRef = useRef<ActiveDocumentStream | null>(null);
 
   useEffect(() => {
-    function flushMarkdown() {
-      markdownWriteTimerRef.current = null;
-      const markdown = pendingMarkdownRef.current;
-      pendingMarkdownRef.current = null;
-
-      if (
-        markdown === null ||
-        markdown === lastWrittenMarkdownRef.current
-      ) {
-        return;
-      }
-
-      try {
-        const nodes = editor
-          .getApi(MarkdownPlugin)
-          .markdown.deserialize(markdown);
-
-        editor.tf.setValue(nodes as Value);
-        lastWrittenMarkdownRef.current = markdown;
-      } catch {
-        // 流式输入可能暂时停留在未闭合的 Markdown 语法中，等待下一段内容。
-      }
+    function resetStreamingState() {
+      editor.getApi(AIChatPlugin).aiChat.stop();
     }
 
-    const unregisterWriter = registerMarkdownWriter((markdown) => {
-      if (
-        markdown === lastWrittenMarkdownRef.current ||
-        markdown === pendingMarkdownRef.current
-      ) {
-        return;
+    function hasPreviewNodes() {
+      return editor.api.some({
+        at: [],
+        match: (node) =>
+          'children' in node && Boolean(node[AI_PREVIEW_KEY]),
+      });
+    }
+
+    function restoreOriginalDocument(stream: ActiveDocumentStream) {
+      editor
+        .getTransforms(BaseAIPlugin)
+        .ai.discardPreview();
+
+      editor.tf.withoutSaving(() => {
+        editor.tf.setValue(structuredClone(stream.originalValue));
+
+        if (stream.originalSelection) {
+          editor.tf.select(structuredClone(stream.originalSelection));
+        } else {
+          editor.tf.deselect();
+        }
+      });
+    }
+
+    const controller: DocumentStreamController = {
+      begin(operationId) {
+        if (activeDocumentStreamRef.current) {
+          throw new Error('已有文档正在流式写入');
+        }
+
+        resetStreamingState();
+
+        const stream: ActiveDocumentStream = {
+          operationId,
+          originalSelection: editor.selection
+            ? structuredClone(editor.selection)
+            : null,
+          originalValue: structuredClone(editor.children as Value),
+          hasContent: false,
+        };
+        const previewStarted = editor
+          .getTransforms(BaseAIPlugin)
+          .ai.beginPreview({ originalBlocks: stream.originalValue });
+
+        if (!previewStarted) {
+          throw new Error('编辑器中已有未完成的 AI 写入预览');
+        }
+
+        try {
+          editor.tf.withoutSaving(() => {
+            editor.tf.setValue(
+              normalizeStaticValue([
+                {
+                  [AI_PREVIEW_KEY]: true,
+                  children: [{ text: '' }],
+                  type: 'p',
+                },
+              ])
+            );
+            editor.tf.select({
+              anchor: { path: [0, 0], offset: 0 },
+              focus: { path: [0, 0], offset: 0 },
+            });
+          });
+          editor.setOption(AIChatPlugin, '_blockChunks', '');
+          editor.setOption(AIChatPlugin, '_blockPath', null);
+          editor.setOption(AIChatPlugin, '_mdxName', null);
+          editor.setOption(AIChatPlugin, 'streaming', true);
+          activeDocumentStreamRef.current = stream;
+        } catch (error) {
+          restoreOriginalDocument(stream);
+          resetStreamingState();
+          throw error;
+        }
+      },
+      append(operationId, chunk) {
+        const stream = activeDocumentStreamRef.current;
+
+        if (!stream || stream.operationId !== operationId) {
+          throw new Error('文档流式写入会话已经失效');
+        }
+
+        if (!chunk) {
+          return;
+        }
+
+        if (chunk.trim().length > 0) {
+          stream.hasContent = true;
+        }
+
+        editor.tf.withoutSaving(() => {
+          editor.tf.withScrolling(() => {
+            streamInsertChunk(editor, chunk);
+          });
+        });
+      },
+      commit(operationId) {
+        const stream = activeDocumentStreamRef.current;
+
+        if (!stream || stream.operationId !== operationId) {
+          throw new Error('文档流式写入会话已经失效');
+        }
+
+        if (!stream.hasContent || !hasPreviewNodes()) {
+          throw new Error('模型没有生成可写入的 Markdown 内容');
+        }
+
+        const accepted = editor
+          .getTransforms(BaseAIPlugin)
+          .ai.acceptPreview();
+
+        if (!accepted) {
+          throw new Error('无法提交文档流式写入预览');
+        }
+
+        resetStreamingState();
+        activeDocumentStreamRef.current = null;
+      },
+      abort(operationId) {
+        const stream = activeDocumentStreamRef.current;
+
+        if (!stream || stream.operationId !== operationId) {
+          return;
+        }
+
+        const previewNodesExist = hasPreviewNodes();
+        const canceled = editor
+          .getTransforms(BaseAIPlugin)
+          .ai.cancelPreview();
+
+        if (!canceled || !previewNodesExist) {
+          restoreOriginalDocument(stream);
+        }
+
+        resetStreamingState();
+        activeDocumentStreamRef.current = null;
       }
-
-      pendingMarkdownRef.current = markdown;
-
-      if (markdownWriteTimerRef.current === null) {
-        markdownWriteTimerRef.current = setTimeout(flushMarkdown, 80);
-      }
-    });
-
-    return () => {
-      unregisterWriter();
-
-      if (markdownWriteTimerRef.current !== null) {
-        clearTimeout(markdownWriteTimerRef.current);
-        markdownWriteTimerRef.current = null;
-      }
-
-      pendingMarkdownRef.current = null;
     };
-  }, [editor, registerMarkdownWriter]);
+
+    return registerDocumentStreamController(controller);
+  }, [editor, registerDocumentStreamController]);
 
   useEffect(() => {
     function getText(node: Descendant): string {
@@ -281,7 +399,14 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
             value={filename}
             onChange={(event) => setFilename(event.target.value)}
             placeholder="未命名文档"
+            disabled={isDocumentStreaming}
           />
+          {isDocumentStreaming && (
+            <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+              正在流式写入
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -295,11 +420,20 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
               event.target.value = '';
             }}
           />
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isImporting || isDocumentStreaming}
+          >
             {isImporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <FileUp data-icon="inline-start" />}
             导入
           </Button>
-          <Button size="sm" onClick={() => void handleExport()} disabled={isExporting}>
+          <Button
+            size="sm"
+            onClick={() => void handleExport()}
+            disabled={isExporting || isDocumentStreaming}
+          >
             {isExporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <FileDown data-icon="inline-start" />}
             导出 DOCX
           </Button>
@@ -316,8 +450,8 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
         </div>
       </div>
       <Plate editor={editor}>
-        <EditorToolbar onNew={handleNew} />
-        {showSelectionToolbar && (
+        <EditorToolbar onNew={handleNew} disabled={isDocumentStreaming} />
+        {showSelectionToolbar && !isDocumentStreaming && (
           <SelectionFloatingToolbar onAdd={handleAddSelectionToPrompt} />
         )}
         <EditorContainer
@@ -338,7 +472,12 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
             </div>
           )}
           <div className="min-h-full w-full rounded-sm bg-background shadow-sm ring-1 ring-border/60">
-            <Editor className="py-8" variant="fullWidth" placeholder="开始输入文档内容…" />
+            <Editor
+              className="py-8"
+              variant="fullWidth"
+              placeholder="开始输入文档内容…"
+              disabled={isDocumentStreaming}
+            />
           </div>
         </EditorContainer>
       </Plate>
@@ -370,51 +509,65 @@ function SelectionFloatingToolbar({ onAdd }: { onAdd: (text: string) => void }) 
   );
 }
 
-function EditorToolbar({ onNew }: { onNew: () => void }) {
+function EditorToolbar({
+  disabled,
+  onNew,
+}: {
+  disabled?: boolean;
+  onNew: () => void;
+}) {
   const editor = useEditorRef();
 
   return (
     <div className="flex h-12 shrink-0 items-center overflow-x-auto border-b bg-background px-4">
       <Toolbar className="min-w-max gap-1">
         <ToolbarGroup>
-          <ToolbarButton tooltip="撤销" onClick={() => editor.tf.undo()}>
+          <ToolbarButton
+            tooltip="撤销"
+            onClick={() => editor.tf.undo()}
+            disabled={disabled}
+          >
             <Undo2 data-icon="inline-start" />
           </ToolbarButton>
-          <ToolbarButton tooltip="重做" onClick={() => editor.tf.redo()}>
+          <ToolbarButton
+            tooltip="重做"
+            onClick={() => editor.tf.redo()}
+            disabled={disabled}
+          >
             <Redo2 data-icon="inline-start" />
           </ToolbarButton>
         </ToolbarGroup>
         <Separator orientation="vertical" className="mx-1 h-5" />
         <ToolbarGroup>
-          <ToolbarButton tooltip="新建文档" onClick={onNew}>
+          <ToolbarButton tooltip="新建文档" onClick={onNew} disabled={disabled}>
             <FilePlus2 data-icon="inline-start" />
           </ToolbarButton>
         </ToolbarGroup>
         <ToolbarGroup>
-          <ToolbarButton tooltip="标题 1" onClick={() => editor.tf.toggleBlock('h1')}>H1</ToolbarButton>
-          <ToolbarButton tooltip="标题 2" onClick={() => editor.tf.toggleBlock('h2')}>H2</ToolbarButton>
-          <ToolbarButton tooltip="标题 3" onClick={() => editor.tf.toggleBlock('h3')}>H3</ToolbarButton>
-          <ToolbarButton tooltip="引用" onClick={() => editor.tf.toggleBlock('blockquote')}>❝</ToolbarButton>
-          <ToolbarButton tooltip="水平线" onClick={() => editor.tf.insertNodes({ type: 'hr', children: [{ text: '' }] })}>
+          <ToolbarButton tooltip="标题 1" onClick={() => editor.tf.toggleBlock('h1')} disabled={disabled}>H1</ToolbarButton>
+          <ToolbarButton tooltip="标题 2" onClick={() => editor.tf.toggleBlock('h2')} disabled={disabled}>H2</ToolbarButton>
+          <ToolbarButton tooltip="标题 3" onClick={() => editor.tf.toggleBlock('h3')} disabled={disabled}>H3</ToolbarButton>
+          <ToolbarButton tooltip="引用" onClick={() => editor.tf.toggleBlock('blockquote')} disabled={disabled}>❝</ToolbarButton>
+          <ToolbarButton tooltip="水平线" onClick={() => editor.tf.insertNodes({ type: 'hr', children: [{ text: '' }] })} disabled={disabled}>
             <Minus data-icon="inline-start" />
           </ToolbarButton>
         </ToolbarGroup>
         <Separator orientation="vertical" className="mx-1 h-5" />
         <ToolbarGroup>
-          <MarkToolbarButton nodeType="bold" tooltip="加粗">B</MarkToolbarButton>
-          <MarkToolbarButton nodeType="italic" tooltip="斜体">I</MarkToolbarButton>
-          <MarkToolbarButton nodeType="underline" tooltip="下划线">U</MarkToolbarButton>
-          <MarkToolbarButton nodeType="strikethrough" tooltip="删除线">S</MarkToolbarButton>
-          <MarkToolbarButton nodeType="code" tooltip="行内代码">
+          <MarkToolbarButton nodeType="bold" tooltip="加粗" disabled={disabled}>B</MarkToolbarButton>
+          <MarkToolbarButton nodeType="italic" tooltip="斜体" disabled={disabled}>I</MarkToolbarButton>
+          <MarkToolbarButton nodeType="underline" tooltip="下划线" disabled={disabled}>U</MarkToolbarButton>
+          <MarkToolbarButton nodeType="strikethrough" tooltip="删除线" disabled={disabled}>S</MarkToolbarButton>
+          <MarkToolbarButton nodeType="code" tooltip="行内代码" disabled={disabled}>
             <Code2 data-icon="inline-start" />
           </MarkToolbarButton>
-          <MarkToolbarButton nodeType="highlight" tooltip="荧光标记">
+          <MarkToolbarButton nodeType="highlight" tooltip="荧光标记" disabled={disabled}>
             <Highlighter data-icon="inline-start" />
           </MarkToolbarButton>
-          <MarkToolbarButton nodeType="sup" tooltip="上标">
+          <MarkToolbarButton nodeType="sup" tooltip="上标" disabled={disabled}>
             <Superscript data-icon="inline-start" />
           </MarkToolbarButton>
-          <MarkToolbarButton nodeType="sub" tooltip="下标">
+          <MarkToolbarButton nodeType="sub" tooltip="下标" disabled={disabled}>
             <Subscript data-icon="inline-start" />
           </MarkToolbarButton>
         </ToolbarGroup>

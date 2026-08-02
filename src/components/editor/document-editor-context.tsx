@@ -9,9 +9,15 @@ import {
   type ReactNode,
 } from "react"
 
-type MarkdownWriter = (markdown: string) => void
 type PromptAppender = (text: string) => void
 type DocumentImporter = (file: File) => Promise<void>
+
+export type DocumentStreamController = {
+  begin: (operationId: string) => void
+  append: (operationId: string, chunk: string) => void
+  commit: (operationId: string) => void
+  abort: (operationId: string) => void
+}
 
 export type DocumentBlock = {
   path: number[]
@@ -40,10 +46,16 @@ type LocalEditApplier = (edit: LocalEdit) => {
 type DocumentEditorContextValue = {
   hasDocument: boolean
   isEditorOpen: boolean
+  isDocumentStreaming: boolean
   revealEditor: () => void
   closeEditor: () => void
-  registerMarkdownWriter: (writer: MarkdownWriter) => () => void
-  writeMarkdown: (markdown: string) => void
+  registerDocumentStreamController: (
+    controller: DocumentStreamController
+  ) => () => void
+  beginDocumentStream: (operationId: string) => void
+  appendDocumentStream: (operationId: string, chunk: string) => void
+  commitDocumentStream: (operationId: string) => void
+  abortDocumentStream: (operationId?: string) => void
   registerDocumentImporter: (importer: DocumentImporter) => () => void
   importDocument: (file: File) => Promise<void>
   registerPromptAppender: (appender: PromptAppender) => () => void
@@ -61,24 +73,97 @@ const DocumentEditorContext = createContext<
 export function DocumentEditorProvider({ children }: { children: ReactNode }) {
   const [hasDocument, setHasDocument] = useState(false)
   const [isEditorOpen, setIsEditorOpen] = useState(false)
-  const markdownWriterRef = useRef<MarkdownWriter | null>(null)
+  const [isDocumentStreaming, setIsDocumentStreaming] = useState(false)
+  const documentStreamControllerRef =
+    useRef<DocumentStreamController | null>(null)
+  const activeDocumentStreamIdRef = useRef<string | null>(null)
   const documentImporterRef = useRef<DocumentImporter | null>(null)
   const promptAppenderRef = useRef<PromptAppender | null>(null)
   const documentReaderRef = useRef<DocumentReader | null>(null)
   const localEditApplierRef = useRef<LocalEditApplier | null>(null)
 
-  const registerMarkdownWriter = useCallback((writer: MarkdownWriter) => {
-    markdownWriterRef.current = writer
+  const registerDocumentStreamController = useCallback(
+    (controller: DocumentStreamController) => {
+      documentStreamControllerRef.current = controller
 
-    return () => {
-      if (markdownWriterRef.current === writer) {
-        markdownWriterRef.current = null
+      return () => {
+        if (documentStreamControllerRef.current !== controller) {
+          return
+        }
+
+        const operationId = activeDocumentStreamIdRef.current
+
+        if (operationId) {
+          try {
+            controller.abort(operationId)
+          } finally {
+            activeDocumentStreamIdRef.current = null
+            setIsDocumentStreaming(false)
+          }
+        }
+
+        documentStreamControllerRef.current = null
       }
+    },
+    []
+  )
+
+  const beginDocumentStream = useCallback((operationId: string) => {
+    const controller = documentStreamControllerRef.current
+
+    if (!controller) {
+      throw new Error("编辑器尚未准备好，无法开始流式写入")
     }
+
+    if (activeDocumentStreamIdRef.current) {
+      throw new Error("已有文档正在流式写入")
+    }
+
+    controller.begin(operationId)
+    activeDocumentStreamIdRef.current = operationId
+    setIsDocumentStreaming(true)
   }, [])
 
-  const writeMarkdown = useCallback((markdown: string) => {
-    markdownWriterRef.current?.(markdown)
+  const appendDocumentStream = useCallback(
+    (operationId: string, chunk: string) => {
+      if (activeDocumentStreamIdRef.current !== operationId) {
+        throw new Error("文档流式写入会话已经失效")
+      }
+
+      documentStreamControllerRef.current?.append(operationId, chunk)
+    },
+    []
+  )
+
+  const commitDocumentStream = useCallback((operationId: string) => {
+    if (activeDocumentStreamIdRef.current !== operationId) {
+      throw new Error("文档流式写入会话已经失效")
+    }
+
+    const controller = documentStreamControllerRef.current
+
+    if (!controller) {
+      throw new Error("编辑器尚未准备好，无法提交流式写入")
+    }
+
+    controller.commit(operationId)
+    activeDocumentStreamIdRef.current = null
+    setIsDocumentStreaming(false)
+  }, [])
+
+  const abortDocumentStream = useCallback((operationId?: string) => {
+    const activeOperationId = activeDocumentStreamIdRef.current
+
+    if (!activeOperationId || (operationId && operationId !== activeOperationId)) {
+      return
+    }
+
+    try {
+      documentStreamControllerRef.current?.abort(activeOperationId)
+    } finally {
+      activeDocumentStreamIdRef.current = null
+      setIsDocumentStreaming(false)
+    }
   }, [])
 
   const registerDocumentImporter = useCallback((importer: DocumentImporter) => {
@@ -92,6 +177,10 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const importDocument = useCallback((file: File) => {
+    if (activeDocumentStreamIdRef.current) {
+      return Promise.reject(new Error("文档正在流式写入，请先停止生成"))
+    }
+
     const importer = documentImporterRef.current
 
     if (!importer) {
@@ -149,6 +238,13 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const applyLocalEdit = useCallback((edit: LocalEdit) => {
+    if (activeDocumentStreamIdRef.current) {
+      return {
+        success: false,
+        message: "文档正在流式写入，请先停止生成",
+      }
+    }
+
     return (
       localEditApplierRef.current?.(edit) ?? {
         success: false,
@@ -162,10 +258,14 @@ export function DocumentEditorProvider({ children }: { children: ReactNode }) {
       value={{
         hasDocument,
         isEditorOpen,
+        isDocumentStreaming,
         revealEditor,
         closeEditor,
-        registerMarkdownWriter,
-        writeMarkdown,
+        registerDocumentStreamController,
+        beginDocumentStream,
+        appendDocumentStream,
+        commitDocumentStream,
+        abortDocumentStream,
         registerDocumentImporter,
         importDocument,
         registerPromptAppender,

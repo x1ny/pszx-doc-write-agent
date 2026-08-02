@@ -52,6 +52,7 @@ export const workingMemoryStyleActiveTools = [
   "proposeArticleOutline",
   "simulateDocumentDataRefresh",
   "verifyKnowledgeBase",
+  "streamDocumentToPlate",
   "writeMarkdownToPlate",
   "getDocumentSnapshot",
   "applyLocalEdit",

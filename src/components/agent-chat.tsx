@@ -2,7 +2,6 @@
 
 import {
   DefaultChatTransport,
-  lastAssistantMessageIsCompleteWithToolCalls,
   type FileUIPart,
 } from "ai"
 import { useChat } from "@ai-sdk/react"
@@ -16,6 +15,7 @@ import {
   MessageSquareQuote,
   Paperclip,
   Send,
+  Square,
   X,
 } from "lucide-react"
 import { FormEvent, useEffect, useRef, useState } from "react"
@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useDocumentEditor } from "@/components/editor/document-editor-context"
+import { useDocumentWriteStream } from "@/components/editor/use-document-write-stream"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -43,7 +44,10 @@ import {
 } from "@/components/ui/message-scroller"
 import { Toaster, toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
-import type { AssistantAgentUIMessage } from "@/lib/agent"
+import {
+  shouldContinueAfterToolCalls,
+  type AssistantAgentUIMessage,
+} from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
 import type { DocumentMaterial } from "@/lib/document-material"
 
@@ -166,36 +170,41 @@ export function AgentChat() {
     readDocument,
     registerPromptAppender,
     revealEditor,
-    writeMarkdown,
   } = useDocumentEditor()
+  const {
+    isDocumentStreaming,
+    stopDocumentWrite,
+    streamDocument,
+    writePreparedMarkdown,
+  } = useDocumentWriteStream()
 
-  const { messages, sendMessage, addToolOutput, status, error } =
+  const { messages, sendMessage, addToolOutput, stop, status, error } =
     useChat<AssistantAgentUIMessage>({
       transport,
-      onToolCall({ toolCall }) {
+      async onToolCall({ toolCall }) {
         if (toolCall.dynamic) {
           return
         }
 
         if (
           toolCall.toolName !== "getDocumentSnapshot" &&
+          toolCall.toolName !== "streamDocumentToPlate" &&
           toolCall.toolName !== "writeMarkdownToPlate" &&
           toolCall.toolName !== "applyLocalEdit"
         ) {
           return
         }
 
-        setTimeout(() => {
-          
+        setTimeout(async () => {
           try {
             switch (toolCall.toolName) {
               case "getDocumentSnapshot": {
                 const snapshot = readDocument()
-
+  
                 if (!snapshot) {
                   throw new Error("编辑器尚未准备好，无法读取当前文档")
                 }
-
+  
                 addToolOutput({
                   tool: "getDocumentSnapshot",
                   toolCallId: toolCall.toolCallId,
@@ -203,15 +212,29 @@ export function AgentChat() {
                 })
                 return
               }
-              case "writeMarkdownToPlate":
-                revealEditor()
-                writeMarkdown(toolCall.input.markdown)
+              case "streamDocumentToPlate": {
+                await streamDocument(toolCall.toolCallId, toolCall.input)
+  
+                addToolOutput({
+                  tool: "streamDocumentToPlate",
+                  toolCallId: toolCall.toolCallId,
+                  output: { success: true },
+                })
+                return
+              }
+              case "writeMarkdownToPlate": {
+                await writePreparedMarkdown(
+                  toolCall.toolCallId,
+                  toolCall.input.markdown
+                )
+  
                 addToolOutput({
                   tool: "writeMarkdownToPlate",
                   toolCallId: toolCall.toolCallId,
                   output: { success: true },
                 })
                 return
+              }
               case "applyLocalEdit":
                 addToolOutput({
                   tool: "applyLocalEdit",
@@ -221,21 +244,41 @@ export function AgentChat() {
                 return
             }
           } catch (toolError) {
-            addToolOutput({
-              tool: toolCall.toolName,
-              toolCallId: toolCall.toolCallId,
-              state: "output-error",
-              errorText:
-                toolError instanceof Error ? toolError.message : String(toolError),
-            })
-          }
-
-        }, 1000)
-
+            const errorText =
+              toolError instanceof DOMException && toolError.name === "AbortError"
+                ? "用户已停止文档生成"
+                : toolError instanceof Error
+                  ? toolError.message
+                  : String(toolError)
+  
+            switch (toolCall.toolName) {
+              case "getDocumentSnapshot":
+              case "streamDocumentToPlate":
+              case "writeMarkdownToPlate":
+              case "applyLocalEdit": {
+                addToolOutput({
+                  tool: toolCall.toolName,
+                  toolCallId: toolCall.toolCallId,
+                  state: "output-error",
+                  errorText,
+                })
+                return
+              }
+            }
+          }}, 1000)
       },
-      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      sendAutomaticallyWhen: shouldContinueAfterToolCalls,
     })
-  const isBusy = status === "submitted" || status === "streaming"
+  const isChatBusy = status === "submitted" || status === "streaming"
+  const isBusy = isChatBusy || isDocumentStreaming
+
+  function handleStop() {
+    stopDocumentWrite()
+
+    if (isChatBusy) {
+      void stop()
+    }
+  }
 
   useEffect(() => {
     return registerPromptAppender((text) => {
@@ -516,8 +559,9 @@ export function AgentChat() {
               />
               <button
                 type="button"
+                disabled={isBusy}
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-[#646a73] transition-colors outline-none hover:bg-[#f3f4f6] hover:text-[#1f2329] focus-visible:ring-3 focus-visible:ring-[#3370ff]/30"
+                className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-[#646a73] transition-colors outline-none hover:bg-[#f3f4f6] hover:text-[#1f2329] focus-visible:ring-3 focus-visible:ring-[#3370ff]/30 disabled:pointer-events-none disabled:opacity-50"
               >
                 <FileUp className="size-4" aria-hidden="true" />
                 导入文档
@@ -533,13 +577,14 @@ export function AgentChat() {
               </button>
             </div>
             <button
-              type="submit"
-              disabled={isBusy || (!input.trim() && uploadedFiles.length === 0)}
-              aria-label="发送消息"
+              type={isBusy ? "button" : "submit"}
+              disabled={!isBusy && !input.trim() && uploadedFiles.length === 0}
+              aria-label={isBusy ? "停止生成" : "发送消息"}
+              onClick={isBusy ? handleStop : undefined}
               className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg bg-[#3370ff] text-white transition-colors outline-none hover:bg-[#3370ff]/90 focus-visible:ring-3 focus-visible:ring-[#3370ff]/30 disabled:pointer-events-none disabled:opacity-50"
             >
               {isBusy ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                <Square className="size-3.5 fill-current" aria-hidden="true" />
               ) : (
                 <Send className="size-4" aria-hidden="true" />
               )}

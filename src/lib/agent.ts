@@ -1,4 +1,8 @@
-import type { UIMessage } from 'ai';
+import {
+  isToolUIPart,
+  lastAssistantMessageIsCompleteWithToolCalls,
+  type UIMessage,
+} from 'ai';
 
 import type { DocumentMaterial } from '@/lib/document-material';
 import type { ArticleOutline } from '@/lib/article-schema';
@@ -30,6 +34,14 @@ type AssistantAgentUITools = {
   };
   writeMarkdownToPlate: {
     input: { markdown: string };
+    output: { success: boolean };
+  };
+  streamDocumentToPlate: {
+    input: {
+      mode: "create-document" | "replace-document";
+      instruction: string;
+      styleProfile?: string;
+    };
     output: { success: boolean };
   };
   getDocumentSnapshot: {
@@ -136,3 +148,41 @@ export type AssistantAgentUIMessage = UIMessage<
   AssistantAgentUIData,
   AssistantAgentUITools
 >;
+
+/**
+ * 工具调用后模型已经给出正文时，不再为同一结果额外续传一轮。
+ * 工具之前的说明文字不影响续传，只有工具之后的文字才视为本轮已回答。
+ */
+export function shouldContinueAfterToolCalls({
+  messages,
+}: {
+  messages: AssistantAgentUIMessage[];
+}) {
+  if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) {
+    return false;
+  }
+
+  const lastMessage = messages.at(-1);
+
+  if (!lastMessage || lastMessage.role !== 'assistant') {
+    return false;
+  }
+
+  const lastStepStartIndex = lastMessage.parts.reduce(
+    (lastIndex, part, index) =>
+      part.type === 'step-start' ? index : lastIndex,
+    -1
+  );
+  const lastStepParts = lastMessage.parts.slice(lastStepStartIndex + 1);
+  let lastToolIndex = -1;
+
+  lastStepParts.forEach((part, index) => {
+    if (isToolUIPart(part) && !part.providerExecuted) {
+      lastToolIndex = index;
+    }
+  });
+
+  return !lastStepParts.slice(lastToolIndex + 1).some(
+    (part) => part.type === 'text' && part.text.trim().length > 0
+  );
+}

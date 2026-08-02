@@ -38,5 +38,6 @@ assert.equal(
   false
 );
 assert.equal(workingMemoryStyleActiveTools.includes('simulateLeaderStyleAnalysis'), false);
+assert.equal(workingMemoryStyleActiveTools.includes('streamDocumentToPlate'), true);
 
 console.log('style routing checks passed');

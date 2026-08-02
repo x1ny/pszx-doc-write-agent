@@ -56,6 +56,7 @@ const documentSnapshotTool = createTool({
 });
 
 let writtenMarkdown = '';
+let streamDocumentRequest = null;
 const writeMarkdownTool = createTool({
   id: 'writeMarkdownToPlate',
   description: '测试用：将改写后的完整 Markdown 写入模拟编辑器。',
@@ -71,9 +72,27 @@ const writeMarkdownTool = createTool({
   },
 });
 
+const streamDocumentTool = createTool({
+  id: 'streamDocumentToPlate',
+  description: '测试用：记录流式文档写作请求。',
+  inputSchema: z.object({
+    mode: z.enum(['create-document', 'replace-document']),
+    instruction: z.string().min(1),
+    styleProfile: z.string().min(1).optional(),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+  }),
+  execute: async (input) => {
+    streamDocumentRequest = input;
+    return { success: true };
+  },
+});
+
 const agent = mastra.getAgentById('document-agent');
 const clientTools = {
   getDocumentSnapshot: documentSnapshotTool,
+  streamDocumentToPlate: streamDocumentTool,
   writeMarkdownToPlate: writeMarkdownTool,
 };
 
@@ -99,6 +118,11 @@ async function resolveClientToolOutput(toolInvocation) {
 
   if (toolName === 'writeMarkdownToPlate') {
     writtenMarkdown = args.markdown;
+    return { toolCallId, toolName, output: { success: true } };
+  }
+
+  if (toolName === 'streamDocumentToPlate') {
+    streamDocumentRequest = args;
     return { toolCallId, toolName, output: { success: true } };
   }
 
@@ -203,8 +227,9 @@ console.log('\n=== Mock editor write ===');
 console.log(
   JSON.stringify(
     {
-      success: Boolean(writtenMarkdown),
+      success: Boolean(writtenMarkdown || streamDocumentRequest),
       markdownLength: writtenMarkdown.length,
+      streamDocumentRequest,
     },
     null,
     2

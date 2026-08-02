@@ -21,9 +21,30 @@ const localEditSchema = z.object({
 
 export const writeMarkdownToPlate = createTool({
   id: 'writeMarkdownToPlate',
-  description: '将已经完成的完整公文 Markdown 内容写入用户当前打开的 Plate 编辑器。',
+  description: '将其他服务端工具已经生成好的完整 Markdown 内容写入用户当前打开的 Plate 编辑器。普通文章创作和整篇风格改写应使用 streamDocumentToPlate。',
   inputSchema: z.object({
     markdown: z.string().min(1).describe('完整文章的 Markdown 内容'),
+  }),
+  outputSchema: z.object({ success: z.boolean() }),
+});
+
+export const streamDocumentToPlate = createTool({
+  id: 'streamDocumentToPlate',
+  description:
+    '在浏览器中启动真正的流式公文写入。用于创作新文章或整篇改写当前文档；只传写作要求和可选风格画像，不要在参数中生成或传入完整正文。',
+  inputSchema: z.object({
+    mode: z
+      .enum(['create-document', 'replace-document'])
+      .describe('创作新文档或整篇改写当前文档'),
+    instruction: z
+      .string()
+      .min(1)
+      .describe('完整、明确的写作要求；创作长文时应包含用户确认后的大纲'),
+    styleProfile: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('风格分析工作流返回的原始 styleProfile，未指定人物风格时不传'),
   }),
   outputSchema: z.object({ success: z.boolean() }),
 });

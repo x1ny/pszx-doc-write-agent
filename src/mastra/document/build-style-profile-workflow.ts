@@ -84,6 +84,16 @@ const synthesisProgressMessages = [
   '正在整理可直接用于改写的风格约束',
 ];
 
+const progressTickDelayRange = {
+  min: 1600,
+  max: 3400,
+} as const;
+
+function getRandomProgressTickDelay() {
+  const { min, max } = progressTickDelayRange;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 function getProgressPartId(progress: StyleProfileProgressData) {
   return progress.kind === 'workflow'
     ? `style-profile:${progress.runId}:workflow`
@@ -153,16 +163,18 @@ async function runWithProgressMessages<T>({
 }: {
   operation: Promise<T>;
   messages: string[];
-  onProgress: (message: string, elapsedSeconds: number) => Promise<void>;
+  onProgress: (message: string) => Promise<void>;
 }) {
   const progressController = new AbortController();
-  const startedAt = Date.now();
   const progressLoop = (async () => {
     let messageIndex = 0;
 
     while (!progressController.signal.aborted) {
       try {
-        await waitForProgressTick(2200, progressController.signal);
+        await waitForProgressTick(
+          getRandomProgressTickDelay(),
+          progressController.signal
+        );
       } catch {
         return;
       }
@@ -170,8 +182,7 @@ async function runWithProgressMessages<T>({
       if (progressController.signal.aborted) return;
 
       await onProgress(
-        messages[messageIndex % messages.length],
-        Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+        messages[messageIndex % messages.length]
       );
       messageIndex += 1;
     }
@@ -307,8 +318,7 @@ const analyzeOneStyleReference = createStep({
 
     const reportArticleProgress = async (
       status: StyleProfileArticleProgress['article']['status'],
-      detail: string,
-      elapsedSeconds?: number
+      detail: string
     ) => {
       await emitArticleProgress(writer, {
         runId,
@@ -320,7 +330,6 @@ const analyzeOneStyleReference = createStep({
           position: inputData.position,
           status,
           detail,
-          elapsedSeconds,
         },
       });
     };
@@ -332,8 +341,7 @@ const analyzeOneStyleReference = createStep({
         const analysis = await runWithProgressMessages({
           operation: analyzeStyleProfile(inputData.article, { abortSignal }),
           messages: analysisProgressMessages,
-          onProgress: (message, elapsedSeconds) =>
-            reportArticleProgress('analyzing', message, elapsedSeconds),
+          onProgress: (message) => reportArticleProgress('analyzing', message),
         });
 
         await reportArticleProgress('completed', '分析完成，已提取可迁移的风格特征');

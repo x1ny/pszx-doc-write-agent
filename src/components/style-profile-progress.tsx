@@ -138,9 +138,6 @@ export function StyleProfileProgress({ events }: StyleProfileProgressProps) {
                   )}
                 >
                   {article.detail}
-                  {article.status === "analyzing" && article.elapsedSeconds
-                    ? ` · 已用时 ${article.elapsedSeconds} 秒`
-                    : ""}
                 </span>
               </span>
             </div>

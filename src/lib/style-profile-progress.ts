@@ -32,7 +32,6 @@ export type StyleProfileArticleProgress = StyleProfileProgressBase & {
     position: number
     status: StyleProfileArticleStatus
     detail: string
-    elapsedSeconds?: number
   }
 }
 

@@ -85,13 +85,22 @@ const userRequest = capturedRequest.messages.find(
   (message) => message.role === 'user',
 );
 assert.ok(userRequest);
-assert.equal(typeof userRequest.content, 'string');
-assert.equal((userRequest.content.match(/<attached_files>/g) || []).length, 1);
-assert.equal((userRequest.content.match(/<user_request>/g) || []).length, 1);
-assert.match(userRequest.content, /这是中文 Markdown 内容|Agent 架构调整方案/);
-assert.match(userRequest.content, new RegExp(requestText));
-assert.equal(userRequest.content.includes('/api/files/'), false);
-assert.equal(userRequest.content.includes('data:text/markdown'), false);
+
+// 不同 provider 的 user.content 形态不同：DeepSeek 是扁平字符串，
+// Alibaba 是 parts 数组。这里统一取出文本再断言。
+const userContent =
+  typeof userRequest.content === 'string'
+    ? userRequest.content
+    : userRequest.content
+        .map((part) => (part.type === 'text' ? part.text : JSON.stringify(part)))
+        .join('\n');
+
+assert.equal((userContent.match(/<attached_files>/g) || []).length, 1);
+assert.equal((userContent.match(/<user_request>/g) || []).length, 1);
+assert.match(userContent, /这是中文 Markdown 内容|Agent 架构调整方案/);
+assert.match(userContent, new RegExp(requestText));
+assert.equal(userContent.includes('/api/files/'), false);
+assert.equal(userContent.includes('data:text/markdown'), false);
 
 const returnedUserMessage = result.messages.find(
   (message) => message.role === 'user',
@@ -107,7 +116,7 @@ console.log(
     {
       mode: realRequest ? 'real' : 'mock',
       response: result.text,
-      providerUserContent: userRequest.content.slice(0, 180),
+      providerUserContent: userContent.slice(0, 180),
       persistedUserParts: returnedUserMessage.content.parts.map(
         (part) => part.type,
       ),

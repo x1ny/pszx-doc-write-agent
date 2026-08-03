@@ -1,6 +1,7 @@
 import { toAISdkMessages } from "@mastra/ai-sdk/ui"
 
 import { isBrowserResourceId, isChatThreadId } from "@/lib/chat-session"
+import { restoreUploadedFilePartsFromStored } from "@/lib/uploaded-file-reference"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -43,7 +44,10 @@ export async function GET(request: Request, context: RouteContext) {
           createdAt: thread.createdAt.toISOString(),
           updatedAt: thread.updatedAt.toISOString(),
         },
-        messages: toAISdkMessages(messages, { version: "v6" }),
+        messages: restoreUploadedFilePartsFromStored(
+          toAISdkMessages(messages, { version: "v6" }),
+          messages
+        ),
       },
       { headers: { "Cache-Control": "no-store" } }
     )

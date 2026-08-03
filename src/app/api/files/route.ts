@@ -6,9 +6,9 @@ import {
   maxUploadSize,
   getContentPath,
   getMetadataPath,
-  uploadFilesystem,
+  uploadStorage,
   type UploadedFileRecord,
-} from '@/lib/file-workspace';
+} from '@/lib/file-storage';
 import { createDocumentMaterial } from '@/mastra/document/materials';
 
 export const runtime = 'nodejs';
@@ -54,28 +54,26 @@ export async function POST(request: Request) {
   };
 
   try {
-    await uploadFilesystem.init();
-    await uploadFilesystem.writeFile(
+    await uploadStorage.init();
+    await uploadStorage.writeFile(
       contentPath,
       Buffer.from(await file.arrayBuffer()),
       {
-        recursive: true,
         overwrite: false,
         mimeType: record.mimeType,
       },
     );
-    await uploadFilesystem.writeFile(
+    await uploadStorage.writeFile(
       metadataPath,
       JSON.stringify(record, null, 2),
       {
-        recursive: true,
         overwrite: false,
         mimeType: 'application/json',
       },
     );
   } catch (error) {
-    await uploadFilesystem.deleteFile(contentPath, { force: true }).catch(() => {});
-    await uploadFilesystem.rmdir(id, { recursive: true, force: true }).catch(() => {});
+    await uploadStorage.deleteFile(contentPath).catch(() => {});
+    await uploadStorage.rmdir(id).catch(() => {});
     console.error('[files] upload failed', error);
     return jsonError('文件保存失败。', 500);
   }

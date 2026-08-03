@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Check,
   ChevronDown,
+  CircleAlert,
   Code2,
   FileDown,
   FilePlus2,
@@ -35,6 +37,10 @@ import {
 import { Plate, useEditorRef, usePlateEditor } from 'platejs/react';
 
 import { createLocalEditApplier } from '@/components/editor/local-edit';
+import {
+  useConversationDocument,
+  type DocumentPersistenceStatus,
+} from '@/components/editor/use-conversation-document';
 import { OfficialDocumentExportDialog } from '@/components/editor/official-document-export-dialog';
 import { BasicNodesKit } from '@/components/editor/plugins/basic-nodes-kit';
 import { Editor, EditorContainer } from '@/components/ui/editor';
@@ -59,6 +65,10 @@ import {
   validateAndExtractOfficialDocumentBody,
   type OfficialDocumentValidationResult,
 } from '@/lib/official-document';
+import type {
+  ConversationDocumentData,
+  SaveConversationDocumentResponse,
+} from '@/lib/conversation-document';
 
 type ActiveDocumentStream = {
   operationId: string;
@@ -67,7 +77,19 @@ type ActiveDocumentStream = {
   hasContent: boolean;
 };
 
-export function PlateEditor({ onClose }: { onClose?: () => void }) {
+type PlateEditorProps = {
+  onClose?: () => void;
+  resourceId?: string;
+  threadId?: string;
+  onDocumentSaved?: (result: SaveConversationDocumentResponse) => void;
+};
+
+export function PlateEditor({
+  onClose,
+  resourceId,
+  threadId,
+  onDocumentSaved,
+}: PlateEditorProps) {
   const {
     appendToPrompt,
     isDocumentStreaming,
@@ -96,6 +118,54 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
     useState<OfficialDocumentValidationResult | null>(null);
   const [showSelectionToolbar, setShowSelectionToolbar] = useState(true);
   const activeDocumentStreamRef = useRef<ActiveDocumentStream | null>(null);
+
+  const readPersistedDraft = useCallback(() => {
+    const content = structuredClone(editor.children as Value);
+
+    return {
+      filename,
+      content,
+      markdown: editor
+        .getApi(MarkdownPlugin)
+        .markdown.serialize({ value: content as Descendant[] }),
+    };
+  }, [editor, filename]);
+
+  const restorePersistedDocument = useCallback(
+    (document: ConversationDocumentData) => {
+      const nodes =
+        document.content.length > 0
+          ? structuredClone(document.content)
+          : structuredClone(value);
+
+      editor.tf.withoutSaving(() => editor.tf.setValue(nodes));
+      setFilename(document.filename);
+    },
+    [editor]
+  );
+
+  const isPersistencePaused = useCallback(
+    () => Boolean(activeDocumentStreamRef.current),
+    []
+  );
+
+  const {
+    error: persistenceError,
+    isUnavailable: isDocumentPersistenceUnavailable,
+    markDirty: markDocumentDirty,
+    retry: retryDocumentPersistence,
+    status: documentPersistenceStatus,
+  } = useConversationDocument({
+    resourceId,
+    threadId,
+    readDraft: readPersistedDraft,
+    restoreDocument: restorePersistedDocument,
+    isPersistencePaused,
+    onDocumentSaved,
+  });
+
+  const isEditorUnavailable =
+    isDocumentStreaming || isDocumentPersistenceUnavailable;
 
   useEffect(() => {
     function resetStreamingState() {
@@ -128,6 +198,10 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
     const controller: DocumentStreamController = {
       begin(operationId) {
+        if (isDocumentPersistenceUnavailable) {
+          throw new Error('会话文档尚未加载完成');
+        }
+
         if (activeDocumentStreamRef.current) {
           throw new Error('已有文档正在流式写入');
         }
@@ -150,6 +224,8 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
           throw new Error('编辑器中已有未完成的 AI 写入预览');
         }
 
+        activeDocumentStreamRef.current = stream;
+
         try {
           editor.tf.withoutSaving(() => {
             editor.tf.setValue(
@@ -170,10 +246,10 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
           editor.setOption(AIChatPlugin, '_blockPath', null);
           editor.setOption(AIChatPlugin, '_mdxName', null);
           editor.setOption(AIChatPlugin, 'streaming', true);
-          activeDocumentStreamRef.current = stream;
         } catch (error) {
           restoreOriginalDocument(stream);
           resetStreamingState();
+          activeDocumentStreamRef.current = null;
           throw error;
         }
       },
@@ -219,6 +295,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
         resetStreamingState();
         activeDocumentStreamRef.current = null;
+        markDocumentDirty({ immediate: true });
       },
       abort(operationId) {
         const stream = activeDocumentStreamRef.current;
@@ -238,11 +315,17 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
         resetStreamingState();
         activeDocumentStreamRef.current = null;
+        markDocumentDirty();
       }
     };
 
     return registerDocumentStreamController(controller);
-  }, [editor, registerDocumentStreamController]);
+  }, [
+    isDocumentPersistenceUnavailable,
+    markDocumentDirty,
+    editor,
+    registerDocumentStreamController,
+  ]);
 
   useEffect(() => {
     function getText(node: Descendant): string {
@@ -270,6 +353,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
     const unregisterReader = registerDocumentReader(() => ({
       blocks: collectBlocks(editor.children as Descendant[]),
+      content: structuredClone(editor.children as Value),
       filename,
       markdown: editor
         .getApi(MarkdownPlugin)
@@ -281,12 +365,15 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
   useEffect(() => {
     const unregisterRestorer = registerDocumentRestorer((snapshot) => {
-      const nodes = editor
-        .getApi(MarkdownPlugin)
-        .markdown.deserialize(snapshot.markdown) as Value;
+      const nodes = snapshot.content?.length
+        ? structuredClone(snapshot.content)
+        : (editor
+            .getApi(MarkdownPlugin)
+            .markdown.deserialize(snapshot.markdown) as Value);
 
       editor.tf.setValue(nodes.length > 0 ? nodes : structuredClone(value));
       setFilename(snapshot.filename);
+      markDocumentDirty({ immediate: true });
     });
 
     const unregisterApplier = registerLocalEditApplier(
@@ -298,6 +385,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
       unregisterApplier();
     };
   }, [
+    markDocumentDirty,
     editor,
     registerDocumentRestorer,
     registerLocalEditApplier,
@@ -329,7 +417,8 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
     setFilename(
       file.name.replace(/\.(docx|md|markdown|txt)$/i, '') || '导入的文档'
     );
-  }, [editor]);
+    markDocumentDirty();
+  }, [editor, markDocumentDirty]);
 
   useEffect(() => registerDocumentImporter(importDocument), [
     importDocument,
@@ -379,6 +468,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
 
   function handleNew() {
     editor.tf.setValue(value);
+    markDocumentDirty();
     setFilename('未命名文档');
   }
 
@@ -409,15 +499,25 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
             aria-label="文档名称"
             className="min-w-0 bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground"
             value={filename}
-            onChange={(event) => setFilename(event.target.value)}
+            onChange={(event) => {
+              setFilename(event.target.value);
+              markDocumentDirty();
+            }}
             placeholder="未命名文档"
-            disabled={isDocumentStreaming}
+            disabled={isEditorUnavailable}
           />
           {isDocumentStreaming && (
             <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
               正在流式写入
             </span>
+          )}
+          {!isDocumentStreaming && (
+            <DocumentPersistenceIndicator
+              status={documentPersistenceStatus}
+              error={persistenceError}
+              onRetry={retryDocumentPersistence}
+            />
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -436,7 +536,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
             variant="outline"
             size="sm"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isImporting || isDocumentStreaming}
+            disabled={isImporting || isEditorUnavailable}
           >
             {isImporting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <FileUp data-icon="inline-start" />}
             导入
@@ -447,7 +547,7 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
               openOnHover
               delay={80}
               closeDelay={150}
-              disabled={isExporting || isDocumentStreaming}
+              disabled={isExporting || isEditorUnavailable}
             >
               {isExporting ? (
                 <Loader2 className="animate-spin" data-icon="inline-start" />
@@ -482,9 +582,12 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
           )}
         </div>
       </div>
-      <Plate editor={editor}>
-        <EditorToolbar onNew={handleNew} disabled={isDocumentStreaming} />
-        {showSelectionToolbar && !isDocumentStreaming && (
+      <Plate
+        editor={editor}
+        onValueChange={() => markDocumentDirty()}
+      >
+        <EditorToolbar onNew={handleNew} disabled={isEditorUnavailable} />
+        {showSelectionToolbar && !isEditorUnavailable && (
           <SelectionFloatingToolbar onAdd={handleAddSelectionToPrompt} />
         )}
         <EditorContainer
@@ -509,8 +612,8 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
               className="py-8"
               variant="fullWidth"
               placeholder="开始输入文档内容…"
-              disabled={isDocumentStreaming}
-              readOnly={isDocumentStreaming}
+              disabled={isEditorUnavailable}
+              readOnly={isEditorUnavailable}
             />
           </div>
         </EditorContainer>
@@ -522,6 +625,69 @@ export function PlateEditor({ onClose }: { onClose?: () => void }) {
         onOpenChange={setIsOfficialExportOpen}
       />
     </section>
+  );
+}
+
+function DocumentPersistenceIndicator({
+  status,
+  error,
+  onRetry,
+}: {
+  status: DocumentPersistenceStatus;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (status === 'disabled' || status === 'idle') {
+    return null;
+  }
+
+  if (status === 'loading' || status === 'saving') {
+    return (
+      <span
+        className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+        aria-live="polite"
+      >
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        {status === 'loading' ? '正在载入' : '正在保存'}
+      </span>
+    );
+  }
+
+  if (status === 'dirty') {
+    return (
+      <span
+        className="shrink-0 text-xs text-muted-foreground"
+        aria-live="polite"
+      >
+        等待保存
+      </span>
+    );
+  }
+
+  if (status === 'saved') {
+    return (
+      <span
+        className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+        aria-live="polite"
+      >
+        <Check className="size-3.5" aria-hidden="true" />
+        已保存
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="flex min-w-0 shrink-0 items-center gap-1 text-xs text-destructive"
+      title={error ?? undefined}
+      aria-live="polite"
+    >
+      <CircleAlert className="size-3.5" aria-hidden="true" />
+      <span>{status === 'conflict' ? '保存冲突' : '保存失败'}</span>
+      <Button type="button" variant="ghost" size="xs" onClick={onRetry}>
+        {status === 'conflict' ? '覆盖保存' : '重试'}
+      </Button>
+    </span>
   );
 }
 

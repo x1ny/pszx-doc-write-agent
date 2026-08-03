@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react"
+import type { Value } from "platejs"
 
 type PromptAppender = (text: string) => void
 type DocumentImporter = (file: File) => Promise<void>
@@ -27,11 +28,13 @@ export type DocumentBlock = {
 
 export type DocumentSnapshot = {
   blocks: DocumentBlock[]
+  content: Value
   filename: string
   markdown?: string
 }
 
 export type RestorableDocumentSnapshot = {
+  content?: Value
   filename: string
   markdown: string
 }

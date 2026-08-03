@@ -7,6 +7,7 @@ import {
   type PointerEvent,
 } from "react"
 import { Loader2, RefreshCw } from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
 
 import { AgentChat } from "@/components/agent-chat"
 import { useChatHistory } from "@/components/chat-history-provider"
@@ -14,11 +15,14 @@ import { PlateEditor } from "@/components/editor/plate-editor"
 import { useDocumentEditor } from "@/components/editor/document-editor-context"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import type { SaveConversationDocumentResponse } from "@/lib/conversation-document"
 
 const MIN_CHAT_WIDTH = 25
 const MAX_CHAT_WIDTH = 75
 
 export function DocumentWorkspace() {
+  const pathname = usePathname()
+  const router = useRouter()
   const { isEditorOpen, closeEditor } = useDocumentEditor()
   const {
     activeThreadId,
@@ -31,6 +35,7 @@ export function DocumentWorkspace() {
     setConversationBusy,
   } = useChatHistory()
   const workspaceRef = useRef<HTMLDivElement>(null)
+  const promotedDocumentThreadRef = useRef<string | null>(null)
   const [chatWidth, setChatWidth] = useState(60)
   const [isResizing, setIsResizing] = useState(false)
 
@@ -48,6 +53,25 @@ export function DocumentWorkspace() {
       Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, nextWidth))
     )
   }, [])
+
+  const handleDocumentSaved = useCallback(
+    (result: SaveConversationDocumentResponse) => {
+      if (result.threadCreated) {
+        void refreshThreads()
+      }
+
+      if (
+        pathname === "/" &&
+        activeThreadId &&
+        promotedDocumentThreadRef.current !== activeThreadId
+      ) {
+        promotedDocumentThreadRef.current = activeThreadId
+        void refreshThreads()
+        router.replace(`/chat/${encodeURIComponent(activeThreadId)}`)
+      }
+    },
+    [activeThreadId, pathname, refreshThreads, router]
+  )
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -141,7 +165,17 @@ export function DocumentWorkspace() {
         style={isEditorOpen ? { width: `${100 - chatWidth}%` } : undefined}
         aria-hidden={!isEditorOpen}
       >
-        <PlateEditor onClose={closeEditor} />
+        <PlateEditor
+          key={
+            resourceId && activeThreadId
+              ? `${resourceId}:${activeThreadId}`
+              : "standalone-editor"
+          }
+          resourceId={resourceId ?? undefined}
+          threadId={activeThreadId ?? undefined}
+          onDocumentSaved={handleDocumentSaved}
+          onClose={closeEditor}
+        />
       </section>
     </main>
   )

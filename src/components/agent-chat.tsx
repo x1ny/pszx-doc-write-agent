@@ -258,9 +258,7 @@ export function AgentChat({
   )
   const {
     applyLocalEdit,
-    hasDocument,
     importDocument,
-    isEditorOpen,
     readDocument,
     registerPromptAppender,
     revealEditor,
@@ -877,15 +875,6 @@ export function AgentChat({
   return (
     <Toaster>
       <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
-      {hasDocument && !isEditorOpen && (
-        <div className="flex h-12 shrink-0 items-center justify-end border-b px-6">
-          <Button type="button" variant="outline" size="sm" onClick={revealEditor}>
-            <FileText data-icon="inline-start" />
-            打开文档
-          </Button>
-        </div>
-      )}
-
       <div className="min-h-0 flex-1 px-8">
         <div className="mx-auto flex h-full w-full max-w-[1000px] flex-col">
           <div className="min-h-0 flex-1">

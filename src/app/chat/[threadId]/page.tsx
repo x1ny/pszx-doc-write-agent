@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation"
 
 import { DocumentWorkspace } from "@/components/document-workspace"
-import { DocumentEditorProvider } from "@/components/editor/document-editor-context"
 import { isChatThreadId } from "@/lib/chat-session"
 
 export default async function Page({
@@ -15,9 +14,5 @@ export default async function Page({
     notFound()
   }
 
-  return (
-    <DocumentEditorProvider>
-      <DocumentWorkspace />
-    </DocumentEditorProvider>
-  )
+  return <DocumentWorkspace />
 }

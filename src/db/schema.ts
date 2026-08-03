@@ -64,3 +64,49 @@ export type ConversationDocument =
   typeof conversationDocuments.$inferSelect
 export type NewConversationDocument =
   typeof conversationDocuments.$inferInsert
+
+/**
+ * 每个 AI 回合结束且文档确实发生变化时留下的一份存档。
+ *
+ * messageId 指向 Mastra 记忆里的那条 assistant 消息（一个用户回合合并为一条），
+ * 因此刷新后可以把存档重新挂回对应的消息气泡。title 在写入时算好并冗余保存，
+ * 让列表接口不必附带正文；正文只在用户点开存档时才通过详情接口读取。
+ */
+export const conversationDocumentArchives = applicationSchema.table(
+  "conversation_document_archives",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    resourceId: varchar("resource_id", { length: 160 }).notNull(),
+    threadId: varchar("thread_id", { length: 160 }).notNull(),
+    messageId: varchar("message_id", { length: 160 }).notNull(),
+    toolCallId: varchar("tool_call_id", { length: 160 }),
+    source: varchar("source", { length: 24 }).notNull(),
+    title: text("title").notNull(),
+    filename: text("filename").notNull(),
+    content: jsonb("content").$type<Value>().notNull(),
+    markdown: text("markdown").notNull(),
+    documentVersion: integer("document_version"),
+    createdAt: timestamp("created_at", {
+      mode: "date",
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("conversation_document_archives_thread_message_uidx").on(
+      table.threadId,
+      table.messageId
+    ),
+    index("conversation_document_archives_thread_created_idx").on(
+      table.resourceId,
+      table.threadId,
+      table.createdAt
+    ),
+  ]
+)
+
+export type ConversationDocumentArchive =
+  typeof conversationDocumentArchives.$inferSelect
+export type NewConversationDocumentArchive =
+  typeof conversationDocumentArchives.$inferInsert

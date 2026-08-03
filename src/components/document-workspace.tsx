@@ -27,6 +27,7 @@ export function DocumentWorkspace() {
   const {
     activeThreadId,
     conversationError,
+    initialDocumentArchives,
     initialMessages,
     isConversationLoading,
     refreshThreads,
@@ -129,6 +130,7 @@ export function DocumentWorkspace() {
             key={activeThreadId}
             threadId={activeThreadId}
             resourceId={resourceId}
+            initialDocumentArchives={initialDocumentArchives}
             initialMessages={initialMessages}
             onBusyChange={setConversationBusy}
             onConversationUpdated={refreshThreads}

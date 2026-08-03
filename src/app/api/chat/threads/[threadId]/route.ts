@@ -1,5 +1,7 @@
 import { toAISdkMessages } from "@mastra/ai-sdk/ui"
 
+import { deleteConversationDocumentArchives } from "@/db/conversation-document-archives"
+import { deleteConversationDocument } from "@/db/conversation-documents"
 import { isBrowserResourceId, isChatThreadId } from "@/lib/chat-session"
 import { restoreUploadedFilePartsFromStored } from "@/lib/uploaded-file-reference"
 
@@ -135,6 +137,9 @@ export async function DELETE(request: Request, context: RouteContext) {
       return Response.json({ error: "会话不存在" }, { status: 404 })
     }
 
+    // 会话文档和存档不在 Mastra 记忆里，删除会话时要一并清理，否则会留下孤儿数据。
+    await deleteConversationDocumentArchives(resourceId, threadId)
+    await deleteConversationDocument(resourceId, threadId)
     await memory.deleteThread(threadId)
 
     return new Response(null, { status: 204 })

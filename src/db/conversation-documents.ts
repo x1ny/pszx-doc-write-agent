@@ -56,6 +56,20 @@ export async function getConversationDocument(
   return document ? toConversationDocumentData(document) : null
 }
 
+export async function deleteConversationDocument(
+  resourceId: string,
+  threadId: string
+) {
+  await db
+    .delete(conversationDocuments)
+    .where(
+      and(
+        eq(conversationDocuments.resourceId, resourceId),
+        eq(conversationDocuments.threadId, threadId)
+      )
+    )
+}
+
 export async function saveConversationDocument({
   resourceId,
   threadId,

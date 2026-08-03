@@ -19,6 +19,10 @@ import {
   isChatThreadId,
   type ChatThreadSummary,
 } from "@/lib/chat-session"
+import type {
+  ConversationDocumentArchiveListResponse,
+  ConversationDocumentArchiveSummary,
+} from "@/lib/conversation-document-archive"
 
 type ThreadListResponse = {
   threads: ChatThreadSummary[]
@@ -33,6 +37,7 @@ type ChatHistoryContextValue = {
   conversationError: string | null
   createConversation: () => void
   deleteThread: (threadId: string) => Promise<void>
+  initialDocumentArchives: ConversationDocumentArchiveSummary[]
   initialMessages: AssistantAgentUIMessage[]
   isConversationBusy: boolean
   isConversationLoading: boolean
@@ -118,6 +123,28 @@ async function fetchThreadMessages(
   return ((await response.json()) as ThreadMessagesResponse).messages
 }
 
+/**
+ * 只取存档元数据，正文留到用户点开卡片时再按需请求，
+ * 避免把整段会话的历史文档正文压进首屏加载。
+ */
+async function fetchThreadDocumentArchives(
+  resourceId: string,
+  threadId: string,
+  signal?: AbortSignal
+) {
+  const response = await fetch(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/document/archives?resourceId=${encodeURIComponent(resourceId)}`,
+    { cache: "no-store", signal }
+  )
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response, "读取文档存档失败"))
+  }
+
+  return ((await response.json()) as ConversationDocumentArchiveListResponse)
+    .archives
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback
 }
@@ -144,6 +171,9 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [initialMessages, setInitialMessages] = useState<
     AssistantAgentUIMessage[]
+  >([])
+  const [initialDocumentArchives, setInitialDocumentArchives] = useState<
+    ConversationDocumentArchiveSummary[]
   >([])
   const [isConversationLoading, setIsConversationLoading] = useState(true)
   const [isConversationBusy, setIsConversationBusy] = useState(false)
@@ -184,6 +214,7 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
       setThreads(loadedThreads)
       setActiveThreadId(null)
       setInitialMessages([])
+      setInitialDocumentArchives([])
       setHistoryError(nextHistoryError)
       setConversationError(null)
       setIsConversationLoading(false)
@@ -235,6 +266,7 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
         ++loadRequestIdRef.current
         setActiveThreadId(null)
         setInitialMessages([])
+        setInitialDocumentArchives([])
         setConversationError(null)
       }
 
@@ -252,17 +284,26 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
       const requestId = ++loadRequestIdRef.current
       setActiveThreadId(threadId)
       setInitialMessages([])
+      setInitialDocumentArchives([])
       setConversationError(null)
       setIsConversationLoading(true)
 
       try {
-        const messages = await fetchThreadMessages(resourceId, threadId)
+        // 存档是消息之外的附加信息，读取失败只让卡片消失，不阻断整段会话。
+        const [messages, archives] = await Promise.all([
+          fetchThreadMessages(resourceId, threadId),
+          fetchThreadDocumentArchives(resourceId, threadId).catch((error) => {
+            console.error("读取文档存档失败", error)
+            return [] as ConversationDocumentArchiveSummary[]
+          }),
+        ])
 
         if (loadRequestIdRef.current !== requestId) {
           return
         }
 
         setInitialMessages(messages)
+        setInitialDocumentArchives(archives)
       } catch (error) {
         if (loadRequestIdRef.current !== requestId) {
           return
@@ -293,6 +334,7 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
     ++loadRequestIdRef.current
     setActiveThreadId(threadId)
     setInitialMessages([])
+    setInitialDocumentArchives([])
     setConversationError(null)
     setIsConversationLoading(false)
   }, [isConversationBusy])
@@ -330,6 +372,7 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
       createConversation,
       deleteThread,
       historyError,
+      initialDocumentArchives,
       initialMessages,
       isConversationBusy,
       isConversationLoading,
@@ -346,6 +389,7 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
       createConversation,
       deleteThread,
       historyError,
+      initialDocumentArchives,
       initialMessages,
       isConversationBusy,
       isConversationLoading,

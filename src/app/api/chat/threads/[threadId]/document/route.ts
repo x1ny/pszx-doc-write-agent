@@ -1,5 +1,6 @@
 import { getConversationDocument, saveConversationDocument } from "@/db/conversation-documents"
 import { isBrowserResourceId, isChatThreadId } from "@/lib/chat-session"
+import { getDocumentTitle } from "@/lib/document-title"
 import type {
   ConversationDocumentConflictResponse,
   SaveConversationDocumentRequest,
@@ -33,29 +34,6 @@ function isSaveDocumentRequest(
     typeof body.markdown === "string" &&
     (body.version === null ||
       (Number.isInteger(body.version) && Number(body.version) > 0))
-  )
-}
-
-function getDocumentThreadTitle(filename: string, markdown: string) {
-  const normalizedFilename = filename.replace(/\s+/g, " ").trim()
-
-  if (normalizedFilename && normalizedFilename !== "未命名文档") {
-    return normalizedFilename.slice(0, 30)
-  }
-
-  const firstContentLine = markdown
-    .split(/\r?\n/)
-    .map((line) =>
-      line
-        .replace(/^\s{0,3}#{1,6}\s+/, "")
-        .replace(/[*_`~]/g, "")
-        .trim()
-    )
-    .find(Boolean)
-
-  return (firstContentLine || normalizedFilename || "未命名文档").slice(
-    0,
-    30
   )
 }
 
@@ -103,7 +81,7 @@ export async function PUT(request: Request, context: DocumentRouteContext) {
       await memory.createThread({
         threadId,
         resourceId: body.resourceId,
-        title: getDocumentThreadTitle(body.filename, body.markdown),
+        title: getDocumentTitle(body.filename, body.markdown),
       })
       threadCreated = true
     }

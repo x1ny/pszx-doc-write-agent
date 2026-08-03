@@ -25,10 +25,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
-import {
-  DocumentSnapshotCard,
-  type SavedDocumentSnapshot,
-} from "@/components/document-snapshot-card"
+import { DocumentSnapshotCard } from "@/components/document-snapshot-card"
 import { DocumentWriteProgress } from "@/components/document-write-progress"
 import { StyleReferenceSelection } from "@/components/style-reference-selection"
 import { StyleProfileProgress } from "@/components/style-profile-progress"
@@ -70,6 +67,13 @@ import {
   type AssistantAgentUIMessage,
 } from "@/lib/agent"
 import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
+import type {
+  ConversationDocumentArchiveDetail,
+  ConversationDocumentArchiveDetailResponse,
+  ConversationDocumentArchiveSummary,
+  CreateConversationDocumentArchiveRequest,
+  CreateConversationDocumentArchiveResponse,
+} from "@/lib/conversation-document-archive"
 import type { DocumentMaterial } from "@/lib/document-material"
 import type { StyleProfileProgressData } from "@/lib/style-profile-progress"
 
@@ -176,6 +180,7 @@ type ActiveDocumentRound = {
   didMutateDocument: boolean
   initialFilename: string
   initialMarkdown: string
+  lastMutationToolCallId: string | null
 }
 
 function getComparableDocument(snapshot: DocumentSnapshot | null) {
@@ -216,7 +221,14 @@ function renderUserMessage(text: string, key: string) {
   )
 }
 
+function toArchiveMap(archives: ConversationDocumentArchiveSummary[]) {
+  return Object.fromEntries(
+    archives.map((archive) => [archive.messageId, archive])
+  )
+}
+
 type AgentChatProps = {
+  initialDocumentArchives: ConversationDocumentArchiveSummary[]
   initialMessages: AssistantAgentUIMessage[]
   onBusyChange?: (isBusy: boolean) => void
   onConversationUpdated?: () => void | Promise<void>
@@ -225,6 +237,7 @@ type AgentChatProps = {
 }
 
 export function AgentChat({
+  initialDocumentArchives,
   initialMessages,
   onBusyChange,
   onConversationUpdated,
@@ -237,9 +250,12 @@ export function AgentChat({
   const [previewFile, setPreviewFile] = useState<UploadedFile | null>(null)
   const [previewContent, setPreviewContent] = useState("")
   const [previewStatus, setPreviewStatus] = useState<FileStatus | null>(null)
-  const [savedDocumentSnapshots, setSavedDocumentSnapshots] = useState<
-    Record<string, SavedDocumentSnapshot>
-  >({})
+  const [documentArchives, setDocumentArchives] = useState<
+    Record<string, ConversationDocumentArchiveSummary>
+  >(() => toArchiveMap(initialDocumentArchives))
+  const archiveDetailCacheRef = useRef(
+    new Map<string, Promise<ConversationDocumentArchiveDetail>>()
+  )
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadFileInputRef = useRef<HTMLInputElement>(null)
@@ -278,13 +294,79 @@ export function AgentChat({
       didMutateDocument: false,
       initialFilename: initialDocument.filename,
       initialMarkdown: initialDocument.markdown,
+      lastMutationToolCallId: null,
     }
   }
 
-  function markDocumentMutationSucceeded() {
+  function markDocumentMutationSucceeded(toolCallId: string) {
     if (activeDocumentRoundRef.current) {
       activeDocumentRoundRef.current.didMutateDocument = true
+      activeDocumentRoundRef.current.lastMutationToolCallId = toolCallId
     }
+  }
+
+  async function loadArchiveDetail(archiveId: string) {
+    const cached = archiveDetailCacheRef.current.get(archiveId)
+
+    if (cached) {
+      return cached
+    }
+
+    const request = (async () => {
+      const response = await fetch(
+        `/api/chat/threads/${encodeURIComponent(threadId)}/document/archives/${encodeURIComponent(archiveId)}?resourceId=${encodeURIComponent(resourceId)}`,
+        { cache: "no-store" }
+      )
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null
+
+        throw new Error(body?.error || "读取文档存档失败")
+      }
+
+      return (
+        (await response.json()) as ConversationDocumentArchiveDetailResponse
+      ).archive
+    })()
+
+    // 失败的请求不留在缓存里，用户重试时才能重新发起。
+    archiveDetailCacheRef.current.set(archiveId, request)
+    request.catch(() => archiveDetailCacheRef.current.delete(archiveId))
+
+    return request
+  }
+
+  /**
+   * 回合结束时把编辑器当前正文直接提交给服务端存档。
+   *
+   * 正文取自浏览器而不是数据库，因此不必等编辑器自动保存落库；
+   * 服务端按 (threadId, messageId) 幂等写入，重复提交不会产生多份存档。
+   */
+  async function archiveDocumentRound(
+    request: CreateConversationDocumentArchiveRequest
+  ) {
+    const response = await fetch(
+      `/api/chat/threads/${encodeURIComponent(threadId)}/document/archives`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      }
+    )
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null
+
+      throw new Error(body?.error || "保存文档存档失败")
+    }
+
+    return (
+      (await response.json()) as CreateConversationDocumentArchiveResponse
+    ).archive
   }
 
   const { messages, sendMessage, addToolOutput, stop, status, error } =
@@ -327,7 +409,7 @@ export function AgentChat({
             }
             case "streamDocumentToPlate": {
               await streamDocument(toolCall.toolCallId, toolCall.input)
-              markDocumentMutationSucceeded()
+              markDocumentMutationSucceeded(toolCall.toolCallId)
 
               addToolOutput({
                 tool: "streamDocumentToPlate",
@@ -341,7 +423,7 @@ export function AgentChat({
                 toolCall.toolCallId,
                 toolCall.input.markdown
               )
-              markDocumentMutationSucceeded()
+              markDocumentMutationSucceeded(toolCall.toolCallId)
 
               addToolOutput({
                 tool: "writeMarkdownToPlate",
@@ -354,7 +436,7 @@ export function AgentChat({
               const output = applyLocalEdit(toolCall.input)
 
               if (output.success) {
-                markDocumentMutationSucceeded()
+                markDocumentMutationSucceeded(toolCall.toolCallId)
               }
 
               addToolOutput({
@@ -431,23 +513,32 @@ export function AgentChat({
           return
         }
 
-        const savedSnapshot: SavedDocumentSnapshot = {
-          createdAt: new Date().toISOString(),
+        void archiveDocumentRound({
+          resourceId,
+          messageId: message.id,
+          toolCallId: activeRound.lastMutationToolCallId,
+          source: "agent-round",
           filename: finalState.filename,
-          id: message.id,
+          content: finalDocument.content,
           markdown: finalState.markdown,
-        }
-
-        setSavedDocumentSnapshots((current) => {
-          if (current[message.id]) {
-            return current
-          }
-
-          return {
-            ...current,
-            [message.id]: savedSnapshot,
-          }
         })
+          .then((archive) => {
+            setDocumentArchives((current) => ({
+              ...current,
+              [archive.messageId]: archive,
+            }))
+          })
+          .catch((archiveError) => {
+            toast.add({
+              type: "error",
+              title: "保存文档版本失败",
+              description:
+                archiveError instanceof Error
+                  ? archiveError.message
+                  : "本轮文档版本没有存档，请稍后重试",
+              timeout: 5000,
+            })
+          })
       },
       sendAutomaticallyWhen: shouldContinueAfterToolCalls,
     })
@@ -645,11 +736,14 @@ export function AgentChat({
     void sendMessage({ text: prompt })
   }
 
-  function handleRestoreDocumentSnapshot(snapshot: SavedDocumentSnapshot) {
+  function handleRestoreDocumentSnapshot(
+    archive: ConversationDocumentArchiveDetail
+  ) {
     try {
       restoreDocument({
-        filename: snapshot.filename,
-        markdown: snapshot.markdown,
+        filename: archive.filename,
+        content: archive.content,
+        markdown: archive.markdown,
       })
       revealEditor()
       toast.add({
@@ -1435,9 +1529,10 @@ export function AgentChat({
                                     />
                                   )
                                 })}
-                                {savedDocumentSnapshots[message.id] && (
+                                {documentArchives[message.id] && (
                                   <DocumentSnapshotCard
-                                    snapshot={savedDocumentSnapshots[message.id]}
+                                    archive={documentArchives[message.id]}
+                                    loadDetail={loadArchiveDetail}
                                     onRestore={handleRestoreDocumentSnapshot}
                                   />
                                 )}

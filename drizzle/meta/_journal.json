@@ -8,6 +8,13 @@
       "when": 1785744058125,
       "tag": "0000_create_conversation_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785764961541,
+      "tag": "0001_create_conversation_document_archives",
+      "breakpoints": true
     }
   ]
 }

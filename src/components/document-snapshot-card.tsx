@@ -21,17 +21,18 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
-
-export type SavedDocumentSnapshot = {
-  createdAt: string
-  filename: string
-  id: string
-  markdown: string
-}
+import { Skeleton } from "@/components/ui/skeleton"
+import type {
+  ConversationDocumentArchiveDetail,
+  ConversationDocumentArchiveSummary,
+} from "@/lib/conversation-document-archive"
 
 type DocumentSnapshotCardProps = {
-  onRestore: (snapshot: SavedDocumentSnapshot) => boolean
-  snapshot: SavedDocumentSnapshot
+  archive: ConversationDocumentArchiveSummary
+  loadDetail: (
+    archiveId: string
+  ) => Promise<ConversationDocumentArchiveDetail>
+  onRestore: (detail: ConversationDocumentArchiveDetail) => boolean
 }
 
 const snapshotTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
@@ -39,18 +40,6 @@ const snapshotTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   hour12: false,
   minute: "2-digit",
 })
-
-function getSnapshotTitle(snapshot: SavedDocumentSnapshot) {
-  const filename = snapshot.filename.trim()
-
-  if (filename && filename !== "未命名文档") {
-    return filename
-  }
-
-  const heading = snapshot.markdown.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1]
-
-  return heading?.replace(/[*_`]/g, "").trim() || filename || "未命名文档"
-}
 
 function formatSnapshotTime(createdAt: string) {
   const date = new Date(createdAt)
@@ -61,33 +50,73 @@ function formatSnapshotTime(createdAt: string) {
 }
 
 export function DocumentSnapshotCard({
+  archive,
+  loadDetail,
   onRestore,
-  snapshot,
 }: DocumentSnapshotCardProps) {
   const [open, setOpen] = useState(false)
-  const title = getSnapshotTitle(snapshot)
-  const createdAt = formatSnapshotTime(snapshot.createdAt)
+  const [detail, setDetail] =
+    useState<ConversationDocumentArchiveDetail | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const createdAt = formatSnapshotTime(archive.createdAt)
+
+  // 鼠标移到卡片上就开始取正文，点开时通常已经就绪；失败留给正式打开时再报错。
+  function prefetchDetail() {
+    if (detail) {
+      return
+    }
+
+    void loadDetail(archive.id)
+      .then(setDetail)
+      .catch(() => undefined)
+  }
+
+  async function ensureDetail() {
+    if (detail) {
+      return
+    }
+
+    setDetailError(null)
+
+    try {
+      setDetail(await loadDetail(archive.id))
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : "读取文档存档失败"
+      )
+    }
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen)
+
+    if (nextOpen) {
+      void ensureDetail()
+    }
+  }
 
   function handleRestore() {
-    if (onRestore(snapshot)) {
+    if (detail && onRestore(detail)) {
       setOpen(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <div className="w-full max-w-sm p-px">
         <DialogTrigger
           render={<Card size="sm" className="w-full cursor-pointer" />}
           nativeButton={false}
-          aria-label={`预览文档版本：${title}`}
+          aria-label={`预览文档版本：${archive.title}`}
+          onPointerEnter={prefetchDetail}
+          onFocus={prefetchDetail}
         >
           <CardHeader className="grid-cols-[auto_minmax(0,1fr)] items-center">
             <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <FileText aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <CardTitle className="truncate">{title}</CardTitle>
+              <CardTitle className="truncate">{archive.title}</CardTitle>
               <CardDescription>创建时间：{createdAt}</CardDescription>
             </div>
           </CardHeader>
@@ -96,17 +125,40 @@ export function DocumentSnapshotCard({
 
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle>{archive.title}</DialogTitle>
           <DialogDescription>创建时间：{createdAt}</DialogDescription>
         </DialogHeader>
         <DialogBody className="mt-4 flex min-h-0 flex-1 flex-col gap-4">
           <ScrollArea className="h-[min(560px,calc(100vh-14rem))] rounded-xl border">
             <div className="px-6 py-5">
-              <Streamdown>{snapshot.markdown}</Streamdown>
+              {detail ? (
+                <Streamdown>{detail.markdown}</Streamdown>
+              ) : detailError ? (
+                <div className="flex flex-col items-start gap-3">
+                  <p className="text-sm text-destructive">{detailError}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void ensureDetail()}
+                  >
+                    重试
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3" aria-label="正在载入存档">
+                  <Skeleton className="h-6 w-1/2" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-4/5" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/5" />
+                </div>
+              )}
             </div>
           </ScrollArea>
           <div className="flex justify-end">
-            <Button type="button" onClick={handleRestore}>
+            <Button type="button" onClick={handleRestore} disabled={!detail}>
               <RotateCcw data-icon="inline-start" />
               覆盖当前编辑器
             </Button>

@@ -17,7 +17,7 @@ type AssistantAgentUITools = {
     input: {
       subject: { name: string; organization?: string };
     };
-    output: { styleProfile: string };
+    output: { report: string; constraints: string };
   };
   proposeArticleOutline: {
     input: { description: string };

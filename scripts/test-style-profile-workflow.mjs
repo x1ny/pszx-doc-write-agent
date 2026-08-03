@@ -1,4 +1,9 @@
+import { config } from 'dotenv';
 import { createJiti } from 'jiti';
+
+// 检索参考材料要读文件存储，缺少 MINIO_* 变量时第一步就会失败。
+config({ path: '.env.local', quiet: true });
+config({ path: '.env', quiet: true });
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
 const { buildStyleProfileWorkflow } = await jiti.import(

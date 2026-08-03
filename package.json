@@ -26,7 +26,9 @@
     "agent:file-prompt-test": "node scripts/test-uploaded-file-prompt.mjs",
     "agent:file-chat-test": "node scripts/test-uploaded-file-agent.mjs",
     "chat:history-file-test": "node scripts/test-history-file-parts.mjs",
-    "editor:local-edit-test": "node scripts/test-local-edit.mjs"
+    "editor:local-edit-test": "node scripts/test-local-edit.mjs",
+    "style:metrics:test": "node scripts/test-style-metrics.mjs",
+    "style:profile:build:test": "node scripts/test-style-profile-build.mjs"
   },
   "dependencies": {
     "@ai-sdk/alibaba": "^1.0.41",

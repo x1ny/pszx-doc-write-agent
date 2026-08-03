@@ -5,10 +5,12 @@ import { z } from 'zod';
 import type {
   StyleProfileArticleProgress,
   StyleProfileProgressData,
+  StyleProfileReportProgress,
   StyleProfileWorkflowProgress,
 } from '@/lib/style-profile-progress';
 
-import { analyzeStyleProfile, synthesizeStyleProfile } from './style-profile';
+import { observeStyleProfile, synthesizeStyleProfile } from './style-profile';
+import { styleObservationSchema } from './style-observation';
 import {
   documentMaterialSchema,
   getDocumentMaterials,
@@ -50,6 +52,7 @@ const loadedDocumentSchema = z.object({
   subjectName: z.string().min(1),
   documentId: z.string().min(1),
   title: z.string().min(1),
+  date: z.string().min(1),
   article: z.string().min(1),
   position: z.number().int().positive(),
   totalCount: z.number().int().positive(),
@@ -59,29 +62,37 @@ const documentAnalysisSchema = z.object({
   subjectName: z.string().min(1),
   documentId: z.string().min(1),
   title: z.string().min(1),
+  date: z.string().min(1),
   position: z.number().int().positive(),
   totalCount: z.number().int().positive(),
   status: z.enum(['succeeded', 'failed']),
-  analysis: z.string().optional(),
+  charCount: z.number().int().nonnegative().optional(),
+  metricsText: z.string().optional(),
+  observations: z.array(styleObservationSchema).optional(),
   error: z.string().optional(),
 });
 
-const finalOutputSchema = z.object({ styleProfile: z.string().min(1) });
+const finalOutputSchema = z.object({
+  /** 用户可见的分析报告 */
+  report: z.string().min(1),
+  /** 写作模型消费的风格约束 */
+  constraints: z.string().min(1),
+});
 
 const analysisProgressMessages = [
-  '正在识别篇章结构和标题层级',
-  '正在提取高频句式与段落节奏',
-  '正在归纳数据、案例和任务部署的表达方式',
-  '正在辨析判断句、过渡句和号召句的使用习惯',
-  '正在核对用词偏好与公文表达强度',
-  '正在筛选可迁移、可复用的稳定风格特征',
+  '正在统计句长分布与指令表达密度',
+  '正在观察开篇挂靠方式与收尾定性习惯',
+  '正在辨析段落的判断、举措与责任落点',
+  '正在采集引号凝练语与强动作动词',
+  '正在核对数据呈现形态与例证来源',
+  '正在校验每条观察的原文证据',
 ];
 
 const synthesisProgressMessages = [
-  '正在对齐多篇文章中的共同写作特征',
-  '正在区分稳定风格与单篇主题造成的偶然表达',
-  '正在合并结构、句式、用词和论证方式',
-  '正在整理可直接用于改写的风格约束',
+  '正在合并多篇材料中语义相同的写法',
+  '正在按支持篇数核定证据强度',
+  '正在分离稳定风格与单篇一次性写法',
+  '正在生成风格总述与可执行的写作约束',
 ];
 
 const progressTickDelayRange = {
@@ -95,9 +106,9 @@ function getRandomProgressTickDelay() {
 }
 
 function getProgressPartId(progress: StyleProfileProgressData) {
-  return progress.kind === 'workflow'
-    ? `style-profile:${progress.runId}:workflow`
-    : `style-profile:${progress.runId}:article:${progress.article.documentId}`;
+  if (progress.kind === 'workflow') return `style-profile:${progress.runId}:workflow`;
+  if (progress.kind === 'report') return `style-profile:${progress.runId}:report`;
+  return `style-profile:${progress.runId}:article:${progress.article.documentId}`;
 }
 
 async function emitStyleProfileProgress(
@@ -119,6 +130,17 @@ async function emitWorkflowProgress(
   await emitStyleProfileProgress(writer, {
     state: 'data-style-profile-progress',
     kind: 'workflow',
+    ...progress,
+  });
+}
+
+async function emitReportProgress(
+  writer: ToolStream,
+  progress: Omit<StyleProfileReportProgress, 'state' | 'kind'>
+) {
+  await emitStyleProfileProgress(writer, {
+    state: 'data-style-profile-progress',
+    kind: 'report',
     ...progress,
   });
 }
@@ -275,6 +297,8 @@ const loadStyleReferences = createStep({
           subjectName: inputData.subject.name,
           documentId,
           title: candidate.title,
+          // date 决定跨篇定档时“近期渐强”的判定，缺失时退回标题排序。
+          date: candidate.date || candidate.title,
           article: await readDocumentMaterialText(candidate.id),
           position: index + 1,
           totalCount,
@@ -338,22 +362,37 @@ const analyzeOneStyleReference = createStep({
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const analysis = await runWithProgressMessages({
-          operation: analyzeStyleProfile(inputData.article, { abortSignal }),
+        const outcome = await runWithProgressMessages({
+          operation: observeStyleProfile(inputData.article, { abortSignal }),
           messages: analysisProgressMessages,
           onProgress: (message) => reportArticleProgress('analyzing', message),
         });
 
-        await reportArticleProgress('completed', '分析完成，已提取可迁移的风格特征');
+        // 证据校验和跨文种筛选都可能清空结果，这时这篇不能算成功，
+        // 否则汇总阶段会拿着空观察去凑数。
+        if (!outcome.observations.length) {
+          throw new Error('本篇没有通过证据校验的可迁移观察。');
+        }
+
+        const discarded = outcome.dropped.length + outcome.documentSpecificCount;
+        await reportArticleProgress(
+          'completed',
+          discarded > 0
+            ? `已确认 ${outcome.observations.length} 条可迁移特征，剔除 ${discarded} 条证据不足或随文种变化的记录`
+            : `已确认 ${outcome.observations.length} 条可迁移特征`
+        );
 
         return {
           subjectName: inputData.subjectName,
           documentId: inputData.documentId,
           title: inputData.title,
+          date: inputData.date,
           position: inputData.position,
           totalCount: inputData.totalCount,
           status: 'succeeded' as const,
-          analysis,
+          charCount: outcome.charCount,
+          metricsText: outcome.metricsText,
+          observations: outcome.observations,
         };
       } catch (error) {
         lastError = error;
@@ -372,6 +411,7 @@ const analyzeOneStyleReference = createStep({
       subjectName: inputData.subjectName,
       documentId: inputData.documentId,
       title: inputData.title,
+      date: inputData.date,
       position: inputData.position,
       totalCount: inputData.totalCount,
       status: 'failed' as const,
@@ -385,13 +425,20 @@ const synthesizeStyleReferences = createStep({
   inputSchema: z.array(documentAnalysisSchema),
   outputSchema: finalOutputSchema,
   execute: async ({ inputData, abortSignal, runId, writer }) => {
-    const successfulAnalyses = inputData
-      .filter((result) => result.status === 'succeeded' && result.analysis)
-      .map((result) => result.analysis as string);
+    const bundles = inputData
+      .filter((result) => result.status === 'succeeded' && result.observations?.length)
+      .map((result) => ({
+        documentId: result.documentId,
+        title: result.title,
+        date: result.date,
+        charCount: result.charCount ?? 0,
+        metricsText: result.metricsText ?? '',
+        observations: result.observations ?? [],
+      }));
     const subjectName = inputData[0]?.subjectName ?? '目标人物';
     const totalCount = inputData[0]?.totalCount ?? inputData.length;
 
-    if (!successfulAnalyses.length) {
+    if (!bundles.length) {
       await emitWorkflowProgress(writer, {
         runId,
         subjectName,
@@ -407,14 +454,12 @@ const synthesizeStyleReferences = createStep({
       subjectName,
       phase: 'synthesizing',
       totalCount,
-      message: `逐篇分析已结束，正在汇总 ${successfulAnalyses.length} 篇有效结果`,
+      message: `逐篇分析已结束，正在汇总 ${bundles.length} 篇有效结果`,
     });
 
     try {
-      const styleProfile = await runWithProgressMessages({
-        operation: synthesizeStyleProfile(subjectName, successfulAnalyses, {
-          abortSignal,
-        }),
+      const { report, constraints, profile } = await runWithProgressMessages({
+        operation: synthesizeStyleProfile({ subjectName, bundles }, { abortSignal }),
         messages: synthesisProgressMessages,
         onProgress: (message) =>
           emitWorkflowProgress(writer, {
@@ -431,10 +476,36 @@ const synthesizeStyleReferences = createStep({
         subjectName,
         phase: 'completed',
         totalCount,
-        message: `写作风格画像已生成，共采用 ${successfulAnalyses.length} 篇文章的分析结果`,
+        message: `写作风格分析报告已生成，采用 ${bundles.length} 篇材料，确认 ${profile.features.length} 项稳定特征`,
       });
 
-      return { styleProfile };
+      const dates = profile.documents.map((document) => document.date);
+      const isSingleDocument = profile.documents.length <= 1;
+      await emitReportProgress(writer, {
+        runId,
+        subjectName,
+        totalCount,
+        documentCount: profile.documents.length,
+        charCount: profile.documents.reduce(
+          (sum, document) => sum + document.charCount,
+          0
+        ),
+        range: isSingleDocument
+          ? profile.documents[0]?.title || '单篇材料'
+          : `${dates[0]}—${dates[dates.length - 1]}`,
+        isSingleDocument,
+        features: profile.features.map(({ dimension, claim, detail, band }) => ({
+          dimension,
+          claim,
+          detail,
+          band,
+        })),
+        incidental: profile.incidental.map((feature) => feature.claim),
+        overview: profile.overview,
+        maxim: profile.maxim,
+      });
+
+      return { report, constraints };
     } catch (error) {
       await emitWorkflowProgress(writer, {
         runId,
@@ -451,14 +522,14 @@ const synthesizeStyleReferences = createStep({
 export const buildStyleProfileWorkflow = createWorkflow({
   id: 'build-style-profile-workflow',
   description:
-    '当用户明确指定某位领导、作者或其他人物，要求分析、学习或模仿其写作风格，或按其风格改写文档时调用。工作流会检索该人物的参考文章、等待用户选择材料、逐篇分析并汇总为可迁移的 Markdown Style Profile；不要用当前待改写文档代替人物参考材料。',
+    '当用户明确指定某位领导、作者或其他人物，要求分析、学习或模仿其写作风格，或按其风格改写文档时调用。工作流会检索该人物的参考文章、等待用户选择材料、逐篇观察并汇总，返回两份结果：report 是给用户看的写作风格分析报告，constraints 是给写作模型执行的风格约束；不要用当前待改写文档代替人物参考材料。',
   inputSchema: workflowInputSchema,
   outputSchema: finalOutputSchema,
 })
   .then(findStyleReferences)
   .then(selectStyleReferences)
   .then(loadStyleReferences)
-  .foreach(analyzeOneStyleReference, { concurrency: 3 })
+  .foreach(analyzeOneStyleReference, { concurrency: 8 })
   .then(synthesizeStyleReferences)
   .commit();
 

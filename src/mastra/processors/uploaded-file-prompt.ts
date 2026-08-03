@@ -6,13 +6,13 @@ import type {
 } from '@mastra/core/processors';
 
 import {
-  documentWorkspace,
+  documentStorage,
   getMetadataPath,
   type UploadedFileRecord,
-} from '@/lib/file-workspace';
+} from '@/lib/file-storage';
+import { extractUploadedFileId as extractFileId } from '@/lib/uploaded-file-reference';
 
-const fileIdPattern =
-  /\/api\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:[/?#]|$)/i;
+export { extractUploadedFileId } from '@/lib/uploaded-file-reference';
 
 export type UploadedFileTextReader = (fileId: string) => Promise<string>;
 
@@ -40,35 +40,6 @@ function escapeXmlAttribute(value: string) {
     .replaceAll('>', '&gt;');
 }
 
-function getFileReference(data: unknown) {
-  if (typeof data === 'string') {
-    return data;
-  }
-
-  if (data instanceof URL) {
-    return data.toString();
-  }
-
-  if (typeof data === 'object' && data !== null) {
-    const value = data as { type?: unknown; url?: unknown };
-
-    if (value.type === 'url' && typeof value.url === 'string') {
-      return value.url;
-    }
-
-    if (value.type === 'url' && value.url instanceof URL) {
-      return value.url.toString();
-    }
-  }
-
-  return undefined;
-}
-
-export function extractUploadedFileId(data: unknown) {
-  const reference = getFileReference(data);
-  return reference ? reference.match(fileIdPattern)?.[1] : undefined;
-}
-
 function getStoredFileReference(part: StoredFilePart) {
   const value = part as StoredFilePart & {
     data?: unknown;
@@ -77,7 +48,7 @@ function getStoredFileReference(part: StoredFilePart) {
     mimeType?: unknown;
     url?: unknown;
   };
-  return extractUploadedFileId(value.data ?? value.url);
+  return extractFileId(value.data ?? value.url);
 }
 
 export function formatAttachedFileContext(
@@ -105,11 +76,10 @@ export function formatAttachedFileContext(
 }
 
 async function parseUploadedFileRecord(fileId: string) {
-  await documentWorkspace.init();
-  const metadata = await documentWorkspace.filesystem.readFile(
-    getMetadataPath(fileId),
-    { encoding: 'utf8' },
-  );
+  await documentStorage.init();
+  const metadata = await documentStorage.readFile(getMetadataPath(fileId), {
+    encoding: 'utf8',
+  });
   const record = JSON.parse(String(metadata)) as Partial<UploadedFileRecord>;
 
   if (
@@ -142,9 +112,7 @@ function decodeText(buffer: Buffer) {
 
 export async function readUploadedFileText(fileId: string) {
   const record = await parseUploadedFileRecord(fileId);
-  const content = await documentWorkspace.filesystem.readFile(
-    record.contentPath,
-  );
+  const content = await documentStorage.readFile(record.contentPath);
   const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content);
 
   if (record.extension === '.docx') {
@@ -220,15 +188,28 @@ export async function transformStoredMessagesWithUploadedFiles(
     const otherParts = parts.filter(
       (part) => !isStoredTextPart(part) && !isStoredFilePart(part),
     );
+    const promptText = sections.join('\n\n');
+    // 光改 parts 不够：Mastra 会用 experimental_attachments 重新生成 file part，
+    // 本地 URL 又会被塞回 prompt，最终触发 provider 的
+    // “Only image file parts are supported”。这两个附件表示必须一起清掉。
+    const restContent = { ...message.content } as StoredMessage['content'] & {
+      experimental_attachments?: unknown;
+      content?: unknown;
+    };
+    delete restContent.experimental_attachments;
 
     nextMessages.push({
       ...message,
       content: {
-        ...message.content,
+        ...restContent,
+        // content 是同一条消息的扁平文本表示，不同步会让模型只看到原始提问、看不到文件正文。
+        ...(typeof restContent.content === 'string'
+          ? { content: promptText }
+          : {}),
         parts: [
           {
             type: 'text',
-            text: sections.join('\n\n'),
+            text: promptText,
           },
           ...otherParts,
         ],

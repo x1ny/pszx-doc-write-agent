@@ -7,9 +7,9 @@ import { z } from 'zod';
 import {
   getContentPath,
   getMetadataPath,
-  uploadFilesystem,
+  uploadStorage,
   type UploadedFileRecord,
-} from '@/lib/file-workspace';
+} from '@/lib/file-storage';
 import type { DocumentMaterial } from '@/lib/document-material';
 import { readUploadedFileText } from '../processors/uploaded-file-prompt';
 
@@ -113,16 +113,16 @@ function getSystemMaterialRecord(
 
 async function readStoredRecord(id: string) {
   const metadataPath = getMetadataPath(id);
-  if (!(await uploadFilesystem.exists(metadataPath))) return undefined;
+  if (!(await uploadStorage.exists(metadataPath))) return undefined;
 
-  const metadata = await uploadFilesystem.readFile(metadataPath, {
+  const metadata = await uploadStorage.readFile(metadataPath, {
     encoding: 'utf8',
   });
   return JSON.parse(String(metadata)) as Partial<UploadedFileRecord>;
 }
 
 async function initializeSystemMaterials() {
-  await uploadFilesystem.init();
+  await uploadStorage.init();
 
   return Promise.all(
     systemMaterialDefinitions.map(async (definition) => {
@@ -137,7 +137,7 @@ async function initializeSystemMaterials() {
         current.version === definition.version &&
         current.checksum === checksum &&
         current.contentPath === contentPath &&
-        (await uploadFilesystem.exists(contentPath));
+        (await uploadStorage.exists(contentPath));
 
       if (!isCurrent) {
         const record = getSystemMaterialRecord(
@@ -145,16 +145,14 @@ async function initializeSystemMaterials() {
           checksum,
           source.byteLength
         );
-        await uploadFilesystem.writeFile(contentPath, source, {
-          recursive: true,
+        await uploadStorage.writeFile(contentPath, source, {
           overwrite: true,
           mimeType: record.mimeType,
         });
-        await uploadFilesystem.writeFile(
+        await uploadStorage.writeFile(
           getMetadataPath(definition.id),
           JSON.stringify(record, null, 2),
           {
-            recursive: true,
             overwrite: true,
             mimeType: 'application/json',
           }

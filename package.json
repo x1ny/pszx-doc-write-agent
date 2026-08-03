@@ -16,15 +16,18 @@
     "style:profile:test": "node scripts/test-style-profile.mjs",
     "agent:style-routing-test": "node scripts/test-style-routing.mjs",
     "style:workflow:test": "node scripts/test-style-profile-workflow.mjs",
+    "storage:test": "node scripts/test-file-storage.mjs",
     "materials:test": "node scripts/test-document-materials.mjs",
     "agent:data-refresh-test": "node scripts/test-document-data-refresh.mjs",
     "agent:file-prompt-test": "node scripts/test-uploaded-file-prompt.mjs",
     "agent:file-chat-test": "node scripts/test-uploaded-file-agent.mjs",
+    "chat:history-file-test": "node scripts/test-history-file-parts.mjs",
     "editor:local-edit-test": "node scripts/test-local-edit.mjs"
   },
   "dependencies": {
     "@ai-sdk/alibaba": "^1.0.41",
     "@ai-sdk/react": "^3.0.242",
+    "@aws-sdk/client-s3": "^3.1101.0",
     "@base-ui/react": "^1.6.0",
     "@mastra/ai-sdk": "^1.6.3",
     "@mastra/core": "^1.52.1",

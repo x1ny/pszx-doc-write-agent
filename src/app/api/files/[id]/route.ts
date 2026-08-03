@@ -1,8 +1,8 @@
 import {
   getMetadataPath,
-  uploadFilesystem,
+  uploadStorage,
   type UploadedFileRecord,
-} from '@/lib/file-workspace';
+} from '@/lib/file-storage';
 import mammoth from 'mammoth';
 
 export const runtime = 'nodejs';
@@ -70,14 +70,14 @@ export async function GET(request: Request, { params }: RouteContext) {
   }
 
   try {
-    await uploadFilesystem.init();
+    await uploadStorage.init();
     const metadataPath = getMetadataPath(id);
 
-    if (!(await uploadFilesystem.exists(metadataPath))) {
+    if (!(await uploadStorage.exists(metadataPath))) {
       return jsonError('文件不存在。', 404);
     }
 
-    const metadataContent = await uploadFilesystem.readFile(metadataPath, {
+    const metadataContent = await uploadStorage.readFile(metadataPath, {
       encoding: 'utf8',
     });
     const record = parseRecord(JSON.parse(String(metadataContent)));
@@ -86,9 +86,9 @@ export async function GET(request: Request, { params }: RouteContext) {
       return jsonError('文件元数据无效。', 500);
     }
 
-    // 不指定 encoding，让 Mastra 返回 Buffer，保留上传文件的原始字节。
-    // 如果先按 binary 读成字符串，再 Buffer.from(string)，中文 UTF-8 会被重新编码而损坏。
-    const content = await uploadFilesystem.readFile(record.contentPath);
+    // 不指定 encoding，让存储层返回 Buffer，保留上传文件的原始字节。
+    // 如果先按文本读成字符串，再 Buffer.from(string)，中文 UTF-8 会被重新编码而损坏。
+    const content = await uploadStorage.readFile(record.contentPath);
     const query = new URL(request.url).searchParams;
 
     if (query.get('preview') === '1') {

@@ -106,14 +106,18 @@ Workspace 读取文件
 
 ## 三、文件存储方案
 
-当前 Demo 使用 Mastra Workspace 的 `LocalFilesystem`，实际目录为：
+当前使用 MinIO（S3 兼容对象存储），object key 为：
 
 ```text
-.data/uploads/{fileId}/content.md
-.data/uploads/{fileId}/metadata.json
+{fileId}/content.md
+{fileId}/metadata.json
 ```
 
 文件内容与文件元数据分开保存。
+
+早期版本用的是 Mastra Workspace 的 `LocalFilesystem`，落在 `.data/uploads/` 下。因为这套 key 约定本身就是扁平的，迁移到对象存储时路径逻辑一行没改 —— 只把读写实现换掉了。
+
+需要注意的是，当时引入的 `Workspace` 实际上从未接进 Agent（没有作为工作区能力暴露给工具），它只是被 processor 当作文件读取器使用，所以移除它不损失任何能力。
 
 ### 文件内容
 
@@ -139,19 +143,18 @@ Workspace 读取文件
 
 ### 读写权限分离
 
-当前配置使用了两个文件系统实例：
+对象存储没有 `readOnly` 标志，改成导出两个不同能力的对象，Agent 侧在类型层面就拿不到写方法：
 
 ```ts
-// 上传 API 使用，可写
-export const uploadFilesystem = new LocalFilesystem(...)
+// 上传 API 使用，可读写
+export const uploadStorage = {
+  init, exists, readFile, writeFile, deleteFile, rmdir,
+}
 
 // Agent 使用，只读
-export const documentWorkspace = new Workspace({
-  filesystem: new LocalFilesystem({
-    basePath: uploadBasePath,
-    readOnly: true,
-  }),
-})
+export const documentStorage: ReadonlyFileStorage = {
+  init, exists, readFile,
+}
 ```
 
 这样可以保证：
@@ -159,6 +162,20 @@ export const documentWorkspace = new Workspace({
 - 上传接口可以写入文件。
 - Agent 可以读取文件。
 - Agent 不会因为工具调用而随意删除或覆盖用户上传的文件。
+
+### 环境变量
+
+```text
+MINIO_ENDPOINT=http://minio-host:9000   # S3 API 端口，不是 9001 控制台端口
+MINIO_BUCKET=doc-agent
+MINIO_ACCESS_KEY=...
+MINIO_SECRET_KEY=...
+MINIO_REGION=us-east-1
+```
+
+客户端用 `@aws-sdk/client-s3` 且必须开 `forcePathStyle: true`（MinIO 不支持 virtual-host 风格的 bucket 域名），这样以后换真 S3 或阿里云 OSS 也不用改代码。
+
+S3 客户端延迟创建并挂在 `globalThis` 上，避免缺少环境变量时在构建阶段就抛错，也让 dev 热重载复用同一个连接池。`init()` 的建桶检查同样只跑一次并缓存，否则每个请求都会多一次 HeadBucket 往返。
 
 ---
 
@@ -426,7 +443,7 @@ Mastra processInputStep
     ↓
 生成 attached_files XML 文本
     ↓
-移除原始 file part，避免 Mastra 下载本地 URL
+移除原始 file part 和 experimental_attachments，避免 Mastra 下载本地 URL
     ↓
 AI SDK DeepSeek provider
     ↓
@@ -605,25 +622,25 @@ persistedUserParts: ["file", "text"]
 
 ## 十三、常见错误速查
 
-### 错误一：Workspace 报路径在 workspace 外
+### 错误一：路径越界
 
-错误形式：
+早期使用 Mastra Workspace 时，传入带前导 `/` 的绝对路径会报：
 
 ```text
 Permission denied: access (path is outside the workspace)
 ```
 
-原因是向 Mastra Workspace 传入了带前导 `/` 的绝对路径：
+换成对象存储后由 `normalizeKey` 统一处理：前导 `/` 被剥掉（`/a/b` 和 `a/b` 指向同一个 object，不构成越权），但包含 `..` 的 key 一律拒绝。
+
+### 错误一之二：读取时用了 transformToString
+
+`GetObject` 返回的 Body 必须走 `transformToByteArray()` 拿原始字节：
 
 ```ts
-'/uuid/content.md'
+const buffer = Buffer.from(await response.Body.transformToByteArray())
 ```
 
-而当前 Workspace 要求相对于 workspace 根目录的路径：
-
-```ts
-'uuid/content.md'
-```
+用 `transformToString()` 会按 UTF-8 强行解码，GB18030 中文文本和 docx 二进制都会损坏 —— 和第五节那个乱码坑是同一个根因，只是换了一层。
 
 ### 错误二：中文预览乱码
 
@@ -652,6 +669,56 @@ sendMessage({ text, files })
 ### 错误五：在 `processLLMRequest` 中处理文件
 
 Mastra 的资源下载可能发生在这个 hook 之前。对于需要阻止文件下载的兼容转换，应使用更早的 `processInputStep`。
+
+### 错误五之二：只清了 `parts`，漏了 `experimental_attachments`
+
+错误形式（Qwen / Alibaba provider）：
+
+```text
+'Only image file parts are supported' functionality not supported.
+```
+
+这个错误极具误导性：`processInputStep` 明明被调用了，转换也成功了，日志里 `parts` 已经只剩 `["text"]`，但 provider 仍然收到了 file part。
+
+原因是 Mastra 的消息 `content` 同时保存了**三份**同一条消息的表示：
+
+```json
+{
+  "parts": [{ "type": "file", "data": "/api/files/xxx" }, { "type": "text", "text": "..." }],
+  "experimental_attachments": [{ "url": "/api/files/xxx", "contentType": "text/markdown" }],
+  "content": "请用一句话概括这个文件。"
+}
+```
+
+如果转换时写成 `{ ...message.content, parts: [...] }`，`experimental_attachments` 会被原样带过去，Mastra 构建 prompt 时又据此**重新生成** file part，本地 URL 于是绕过 `parts` 回到了模型输入里。
+
+正确做法是三者一起处理：
+
+- `parts`：换成展开后的 text part
+- `experimental_attachments`：删除
+- `content`：同步成同一段文本（否则模型可能只看到原始提问，看不到文件正文）
+
+经验：**改写消息时要问清楚这条消息有几种表示，而不是只改看得见的那一种。**
+
+### 错误五之三：历史记录里文件名丢失、地址变成 `data:...;base64,/api/files/...`
+
+从历史会话读取时，文件卡片没有名字、点开也打不开，地址长这样：
+
+```text
+data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,/api/files/cf9cc706-...
+```
+
+原因是存储态 file part 把 URL 放在 `data` 字段里：
+
+```json
+{ "type": "file", "mimeType": "...", "data": "/api/files/xxx", "filename": "测试文档.docx" }
+```
+
+而 `toAISdkMessages` 假定 `data` 是 base64 正文，于是拼成 `data:<mime>;base64,<data>`，并且**不保留 `filename`**。
+
+注意这和第八节 DeepSeek 那个 `Failed to download asset: nulltext/markdown;base64,/api/files/...` 是同一个根因的两次发作：一次发生在去模型的路上，一次发生在回 UI 的路上。
+
+解决办法是在历史读取边界上还原：拿原始存储消息里的 `filename` 和文件 ID，把 `url` 重写回 `/api/files/{id}`（`restoreUploadedFilePartsFromStored`）。文件 ID 可以直接从被拼坏的地址里正则提取，所以即使只有转换后的结果也能救回来。
 
 ### 错误六：多个 hook 重复处理
 
@@ -743,11 +810,14 @@ DeepSeek 接收纯文本
 
 相关实现：
 
-- `src/lib/file-workspace.ts`
+- `src/lib/file-storage.ts`
+- `src/lib/uploaded-file-reference.ts`
 - `src/app/api/files/route.ts`
 - `src/app/api/files/[id]/route.ts`
 - `src/mastra/processors/uploaded-file-prompt.ts`
 - `src/mastra/agents/document-agent.ts`
+- `scripts/test-file-storage.mjs`
+- `scripts/test-history-file-parts.mjs`
 - `scripts/test-uploaded-file-prompt.mjs`
 - `scripts/test-uploaded-file-agent.mjs`
 

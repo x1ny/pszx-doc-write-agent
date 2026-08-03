@@ -32,12 +32,14 @@ type ChatHistoryContextValue = {
   activeThreadId: string | null
   conversationError: string | null
   createConversation: () => void
+  deleteThread: (threadId: string) => Promise<void>
   initialMessages: AssistantAgentUIMessage[]
   isConversationBusy: boolean
   isConversationLoading: boolean
   historyError: string | null
   refreshThreads: () => Promise<void>
   reloadActiveConversation: () => Promise<void>
+  renameThread: (threadId: string, title: string) => Promise<void>
   resourceId: string | null
   setConversationBusy: (isBusy: boolean) => void
   threads: ChatThreadSummary[]
@@ -67,6 +69,36 @@ async function fetchThreads(resourceId: string, signal?: AbortSignal) {
   }
 
   return ((await response.json()) as ThreadListResponse).threads
+}
+
+async function renameThreadRequest(
+  resourceId: string,
+  threadId: string,
+  title: string
+) {
+  const response = await fetch(
+    `/api/chat/threads/${encodeURIComponent(threadId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resourceId, title }),
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response, "重命名会话失败"))
+  }
+}
+
+async function deleteThreadRequest(resourceId: string, threadId: string) {
+  const response = await fetch(
+    `/api/chat/threads/${encodeURIComponent(threadId)}?resourceId=${encodeURIComponent(resourceId)}`,
+    { method: "DELETE" }
+  )
+
+  if (!response.ok) {
+    throw new Error(await getResponseError(response, "删除会话失败"))
+  }
 }
 
 async function fetchThreadMessages(
@@ -179,6 +211,38 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
     }
   }, [resourceId])
 
+  const renameThread = useCallback(
+    async (threadId: string, title: string) => {
+      if (!resourceId) {
+        return
+      }
+
+      await renameThreadRequest(resourceId, threadId, title)
+      await refreshThreads()
+    },
+    [resourceId, refreshThreads]
+  )
+
+  const deleteThread = useCallback(
+    async (threadId: string) => {
+      if (!resourceId) {
+        return
+      }
+
+      await deleteThreadRequest(resourceId, threadId)
+
+      if (activeThreadId === threadId) {
+        ++loadRequestIdRef.current
+        setActiveThreadId(null)
+        setInitialMessages([])
+        setConversationError(null)
+      }
+
+      await refreshThreads()
+    },
+    [resourceId, activeThreadId, refreshThreads]
+  )
+
   const loadConversation = useCallback(
     async (threadId: string) => {
       if (!resourceId || !isChatThreadId(threadId)) {
@@ -264,12 +328,14 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
       activeThreadId,
       conversationError,
       createConversation,
+      deleteThread,
       historyError,
       initialMessages,
       isConversationBusy,
       isConversationLoading,
       refreshThreads,
       reloadActiveConversation,
+      renameThread,
       resourceId,
       setConversationBusy: setIsConversationBusy,
       threads,
@@ -278,12 +344,14 @@ export function ChatHistoryProvider({ children }: { children: ReactNode }) {
       activeThreadId,
       conversationError,
       createConversation,
+      deleteThread,
       historyError,
       initialMessages,
       isConversationBusy,
       isConversationLoading,
       refreshThreads,
       reloadActiveConversation,
+      renameThread,
       resourceId,
       threads,
     ]

@@ -68,8 +68,17 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-* {
-  border-color: var(--border);
+/* 放进 base 层，否则未分层的规则会盖掉 border-transparent 等工具类 */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  /* Tailwind v4 的 Preflight 不再给按钮设置 cursor: pointer，这里补回来 */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 body {

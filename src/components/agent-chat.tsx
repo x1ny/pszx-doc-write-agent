@@ -9,6 +9,8 @@ import { useChat } from "@ai-sdk/react"
 import {
   AlertTriangle,
   Bot,
+  ChevronDown,
+  Cpu,
   Database,
   FileText,
   FileUp,
@@ -39,6 +41,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   useDocumentEditor,
   type DocumentSnapshot,
@@ -771,19 +782,50 @@ export function AgentChat() {
                 上传文件
               </button>
             </div>
-            <button
-              type={isBusy ? "button" : "submit"}
-              disabled={!isBusy && !input.trim() && uploadedFiles.length === 0}
-              aria-label={isBusy ? "停止生成" : "发送消息"}
-              onClick={isBusy ? handleStop : undefined}
-              className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg bg-[#3370ff] text-white transition-colors outline-none hover:bg-[#3370ff]/90 focus-visible:ring-3 focus-visible:ring-[#3370ff]/30 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {isBusy ? (
-                <Square className="size-3.5 fill-current" aria-hidden="true" />
-              ) : (
-                <Send className="size-4" aria-hidden="true" />
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-32 justify-between px-2.5"
+                    />
+                  }
+                  aria-label="当前模型：本地模型"
+                  disabled={isBusy}
+                >
+                  <Cpu data-icon="inline-start" aria-hidden="true" />
+                  <span>本地模型</span>
+                  <ChevronDown data-icon="inline-end" aria-hidden="true" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-32">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>模型</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup defaultValue="local">
+                      <DropdownMenuRadioItem value="local">
+                        <Cpu aria-hidden="true" />
+                        本地模型
+                      </DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button
+                type={isBusy ? "button" : "submit"}
+                disabled={!isBusy && !input.trim() && uploadedFiles.length === 0}
+                aria-label={isBusy ? "停止生成" : "发送消息"}
+                onClick={isBusy ? handleStop : undefined}
+                className="inline-flex size-8 cursor-pointer items-center justify-center rounded-lg bg-[#3370ff] text-white transition-colors outline-none hover:bg-[#3370ff]/90 focus-visible:ring-3 focus-visible:ring-[#3370ff]/30 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {isBusy ? (
+                  <Square className="size-3.5 fill-current" aria-hidden="true" />
+                ) : (
+                  <Send className="size-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </form>

@@ -492,20 +492,6 @@ export function PlateEditor({
       )}
       <div className="flex h-16 shrink-0 items-center justify-between border-b bg-background px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <FilePlus2 data-icon="inline-start" />
-          </div>
-          <input
-            aria-label="文档名称"
-            className="min-w-0 bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground"
-            value={filename}
-            onChange={(event) => {
-              setFilename(event.target.value);
-              markDocumentDirty();
-            }}
-            placeholder="未命名文档"
-            disabled={isEditorUnavailable}
-          />
           {isDocumentStreaming && (
             <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />

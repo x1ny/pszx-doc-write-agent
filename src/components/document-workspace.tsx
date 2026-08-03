@@ -6,10 +6,13 @@ import {
   useState,
   type PointerEvent,
 } from "react"
+import { Loader2, RefreshCw } from "lucide-react"
 
 import { AgentChat } from "@/components/agent-chat"
+import { useChatHistory } from "@/components/chat-history-provider"
 import { PlateEditor } from "@/components/editor/plate-editor"
 import { useDocumentEditor } from "@/components/editor/document-editor-context"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 const MIN_CHAT_WIDTH = 25
@@ -17,6 +20,16 @@ const MAX_CHAT_WIDTH = 75
 
 export function DocumentWorkspace() {
   const { isEditorOpen, closeEditor } = useDocumentEditor()
+  const {
+    activeThreadId,
+    conversationError,
+    initialMessages,
+    isConversationLoading,
+    refreshThreads,
+    reloadActiveConversation,
+    resourceId,
+    setConversationBusy,
+  } = useChatHistory()
   const workspaceRef = useRef<HTMLDivElement>(null)
   const [chatWidth, setChatWidth] = useState(60)
   const [isResizing, setIsResizing] = useState(false)
@@ -59,18 +72,44 @@ export function DocumentWorkspace() {
     <main
       ref={workspaceRef}
       className={cn(
-        "isolate flex h-svh w-full overflow-hidden bg-background",
+        "isolate flex h-full w-full overflow-hidden bg-background",
         isResizing && "select-none"
       )}
     >
       <section
         className={cn(
-          "min-w-0",
+          "h-full min-w-0",
           !isEditorOpen && "mx-auto max-w-[1280px]"
         )}
         style={isEditorOpen ? { width: `${chatWidth}%` } : { width: "100%" }}
       >
-        <AgentChat />
+        {isConversationLoading || !resourceId || !activeThreadId ? (
+          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="animate-spin" aria-hidden="true" />
+            正在加载会话…
+          </div>
+        ) : conversationError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <p className="text-sm text-destructive">{conversationError}</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void reloadActiveConversation()}
+            >
+              <RefreshCw data-icon="inline-start" />
+              重新加载
+            </Button>
+          </div>
+        ) : (
+          <AgentChat
+            key={activeThreadId}
+            threadId={activeThreadId}
+            resourceId={resourceId}
+            initialMessages={initialMessages}
+            onBusyChange={setConversationBusy}
+            onConversationUpdated={refreshThreads}
+          />
+        )}
       </section>
 
       <div

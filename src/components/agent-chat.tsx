@@ -21,7 +21,7 @@ import {
   Square,
   X,
 } from "lucide-react"
-import { FormEvent, useEffect, useRef, useState } from "react"
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { ArticleOutlineEditor } from "@/components/article-outline-editor"
@@ -73,27 +73,8 @@ import { outlineSchema, type ArticleOutline } from "@/lib/article-schema"
 import type { DocumentMaterial } from "@/lib/document-material"
 import type { StyleProfileProgressData } from "@/lib/style-profile-progress"
 
-const resourceStorageKey = "document-agent-resource-id"
-
-function getBrowserResourceId() {
-  if (typeof window === "undefined") {
-    return "document-agent-server"
-  }
-
-  try {
-    const existingId = window.localStorage.getItem(resourceStorageKey)
-
-    if (existingId) {
-      return existingId
-    }
-
-    const resourceId = `browser-${crypto.randomUUID()}`
-    window.localStorage.setItem(resourceStorageKey, resourceId)
-    return resourceId
-  } catch {
-    return "document-agent-browser"
-  }
-}
+const selectionContextPattern =
+  /<document_selection>([\s\S]*?)<\/document_selection>\s*/
 
 function lastStepHasClientToolOutput(messages: AssistantAgentUIMessage[]) {
   const lastMessage = messages.at(-1)
@@ -114,38 +95,66 @@ function lastStepHasClientToolOutput(messages: AssistantAgentUIMessage[]) {
   )
 }
 
-const transport = new DefaultChatTransport<AssistantAgentUIMessage>({
-  api: "/api/chat",
-  prepareSendMessagesRequest: ({
-    body,
-    id,
-    messageId,
-    messages,
-    trigger,
-  }) => {
-    const requestBody = { ...body }
+function getInitialThreadTitle(message: AssistantAgentUIMessage) {
+  const text = message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join(" ")
+    .replace(selectionContextPattern, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  const filePart = message.parts.find((part) => part.type === "file")
+  const fallbackTitle = filePart?.filename
+    ? `文件：${filePart.filename}`
+    : "新会话"
+  const title = text || fallbackTitle
 
-    if (lastStepHasClientToolOutput(messages)) {
-      delete requestBody.runId
-      delete requestBody.resumeData
-    }
+  return title.length > 30 ? `${title.slice(0, 30)}…` : title
+}
 
-    return {
-      body: {
-        ...requestBody,
-        messages,
-        trigger,
-        messageId,
-        memory: {
-          thread: `chat-${id}`,
-          resource: getBrowserResourceId(),
+function createChatTransport(resourceId: string) {
+  return new DefaultChatTransport<AssistantAgentUIMessage>({
+    api: "/api/chat",
+    prepareSendMessagesRequest: ({
+      body,
+      id,
+      messageId,
+      messages,
+      trigger,
+    }) => {
+      const requestBody = { ...body }
+      const latestMessage = messages.at(-1)
+
+      if (!latestMessage) {
+        throw new Error("没有可发送的聊天消息")
+      }
+
+      if (lastStepHasClientToolOutput(messages)) {
+        delete requestBody.runId
+        delete requestBody.resumeData
+      }
+
+      const isFirstUserMessage =
+        latestMessage.role === "user" &&
+        !messages.slice(0, -1).some((message) => message.role === "user")
+
+      return {
+        body: {
+          ...requestBody,
+          messages: [latestMessage],
+          trigger,
+          messageId,
+          memory: {
+            thread: isFirstUserMessage
+              ? { id, title: getInitialThreadTitle(latestMessage) }
+              : id,
+            resource: resourceId,
+          },
         },
-      },
-    }
-  },
-})
-
-const selectionContextPattern = /<document_selection>([\s\S]*?)<\/document_selection>\s*/
+      }
+    },
+  })
+}
 
 type UploadedFile = {
   id: string
@@ -207,7 +216,21 @@ function renderUserMessage(text: string, key: string) {
   )
 }
 
-export function AgentChat() {
+type AgentChatProps = {
+  initialMessages: AssistantAgentUIMessage[]
+  onBusyChange?: (isBusy: boolean) => void
+  onConversationUpdated?: () => void | Promise<void>
+  resourceId: string
+  threadId: string
+}
+
+export function AgentChat({
+  initialMessages,
+  onBusyChange,
+  onConversationUpdated,
+  resourceId,
+  threadId,
+}: AgentChatProps) {
   const [input, setInput] = useState("")
   const [selectedReference, setSelectedReference] = useState<string | null>(null)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
@@ -229,6 +252,10 @@ export function AgentChat() {
   )
   const [resumedStyleReferenceToolIds, setResumedStyleReferenceToolIds] =
     useState<Set<string>>(() => new Set())
+  const transport = useMemo(
+    () => createChatTransport(resourceId),
+    [resourceId]
+  )
   const {
     applyLocalEdit,
     hasDocument,
@@ -264,6 +291,8 @@ export function AgentChat() {
 
   const { messages, sendMessage, addToolOutput, stop, status, error } =
     useChat<AssistantAgentUIMessage>({
+      id: threadId,
+      messages: initialMessages,
       transport,
       async onToolCall({ toolCall }) {
         if (toolCall.dynamic) {
@@ -374,6 +403,8 @@ export function AgentChat() {
           return
         }
 
+        void onConversationUpdated?.()
+
         const activeRound = activeDocumentRoundRef.current
         activeDocumentRoundRef.current = null
 
@@ -424,6 +455,14 @@ export function AgentChat() {
     })
   const isChatBusy = status === "submitted" || status === "streaming"
   const isBusy = isChatBusy || isDocumentStreaming
+
+  useEffect(() => {
+    onBusyChange?.(isBusy)
+  }, [isBusy, onBusyChange])
+
+  useEffect(() => {
+    return () => onBusyChange?.(false)
+  }, [onBusyChange])
 
   function handleStop() {
     activeDocumentRoundRef.current = null

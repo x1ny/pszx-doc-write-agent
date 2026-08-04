@@ -2,7 +2,7 @@ import "server-only"
 
 import { and, asc, eq } from "drizzle-orm"
 
-import { db } from "@/db/client"
+import { getDb } from "@/db/client"
 import {
   conversationDocumentArchives,
   type ConversationDocumentArchive,
@@ -72,7 +72,7 @@ export async function listConversationDocumentArchives(
   resourceId: string,
   threadId: string
 ) {
-  const archives = await db
+  const archives = await getDb()
     .select(summaryColumns)
     .from(conversationDocumentArchives)
     .where(
@@ -91,7 +91,7 @@ export async function getConversationDocumentArchive(
   threadId: string,
   archiveId: string
 ) {
-  const [archive] = await db
+  const [archive] = await getDb()
     .select()
     .from(conversationDocumentArchives)
     .where(
@@ -124,7 +124,7 @@ export async function saveConversationDocumentArchive({
   markdown,
   documentVersion,
 }: SaveConversationDocumentArchiveInput) {
-  const [createdArchive] = await db
+  const [createdArchive] = await getDb()
     .insert(conversationDocumentArchives)
     .values({
       resourceId,
@@ -150,7 +150,7 @@ export async function saveConversationDocumentArchive({
     return { created: true, archive: toArchiveSummary(createdArchive) }
   }
 
-  const [existingArchive] = await db
+  const [existingArchive] = await getDb()
     .select(summaryColumns)
     .from(conversationDocumentArchives)
     .where(
@@ -170,7 +170,7 @@ export async function deleteConversationDocumentArchives(
   resourceId: string,
   threadId: string
 ) {
-  await db
+  await getDb()
     .delete(conversationDocumentArchives)
     .where(
       and(

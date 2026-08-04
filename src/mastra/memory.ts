@@ -1,57 +1,36 @@
 import { Memory } from '@mastra/memory';
 import { PostgresStore } from '@mastra/pg';
 
+import { getDatabaseConnectionConfig } from '@/db/environment';
+
 const globalForDocumentMemory = globalThis as typeof globalThis & {
   documentAgentMemory?: Memory;
   documentAgentPgStore?: PostgresStore;
 };
 
-function getRequiredDatabaseEnvironment(
-  key: 'DB_HOST' | 'DB_PORT' | 'DB_NAME' | 'DB_USER' | 'DB_PASSWORD',
-) {
-  const value = process.env[key]?.trim();
-
-  if (!value) {
-    throw new Error(`Missing required database environment variable: ${key}`);
+// 存储与 Memory 延迟创建：next build 收集路由信息时会 import 到这里，
+// 构建阶段没有数据库环境变量，顶层读取会直接让构建失败。
+export function getDocumentMemoryStorage() {
+  if (!globalForDocumentMemory.documentAgentPgStore) {
+    globalForDocumentMemory.documentAgentPgStore = new PostgresStore({
+      id: 'document-agent-memory',
+      ...getDatabaseConnectionConfig(),
+    });
   }
 
-  return value;
+  return globalForDocumentMemory.documentAgentPgStore;
 }
 
-function getDatabasePort() {
-  const value = getRequiredDatabaseEnvironment('DB_PORT');
-  const port = Number(value);
-
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error('DB_PORT must be an integer between 1 and 65535');
-  }
-
-  return port;
-}
-
-export const documentMemoryStorage =
-  globalForDocumentMemory.documentAgentPgStore ??
-  new PostgresStore({
-    id: 'document-agent-memory',
-    host: getRequiredDatabaseEnvironment('DB_HOST'),
-    port: getDatabasePort(),
-    database: getRequiredDatabaseEnvironment('DB_NAME'),
-    user: getRequiredDatabaseEnvironment('DB_USER'),
-    password: getRequiredDatabaseEnvironment('DB_PASSWORD'),
-  });
-
-globalForDocumentMemory.documentAgentPgStore = documentMemoryStorage;
-
-export const documentMemory =
-  globalForDocumentMemory.documentAgentMemory ??
-  new Memory({
-    storage: documentMemoryStorage,
-    options: {
-      lastMessages: 10,
-      workingMemory: {
-        enabled: true,
-        scope: 'resource',
-        template: `# 用户写作偏好
+export function getDocumentMemory() {
+  if (!globalForDocumentMemory.documentAgentMemory) {
+    globalForDocumentMemory.documentAgentMemory = new Memory({
+      storage: getDocumentMemoryStorage(),
+      options: {
+        lastMessages: 10,
+        workingMemory: {
+          enabled: true,
+          scope: 'resource',
+          template: `# 用户写作偏好
 
 ## 写作风格
 - 常用公文风格：
@@ -67,8 +46,10 @@ export const documentMemory =
 ## 长期目标
 - 用户长期写作目标：
 - 其他需要长期遵循的偏好：`,
+        },
       },
-    },
-  });
+    });
+  }
 
-globalForDocumentMemory.documentAgentMemory = documentMemory;
+  return globalForDocumentMemory.documentAgentMemory;
+}

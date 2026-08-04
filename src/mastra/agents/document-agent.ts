@@ -10,7 +10,7 @@ import {
   verifyKnowledgeBase,
 } from '../document/tools';
 import { buildStyleProfileWorkflow } from '../document/build-style-profile-workflow';
-import { documentMemory } from '../memory';
+import { getDocumentMemory } from '../memory';
 import { UploadedFilePromptProcessor } from '../processors/uploaded-file-prompt';
 
 const alibaba = createAlibaba({
@@ -92,7 +92,8 @@ const uploadedFilePromptProcessor = new UploadedFilePromptProcessor();
 
 export const documentAgent = new Agent({
   id: 'document-agent',
-  memory: documentMemory,
+  // 传函数而不是实例，Memory 就跟着推迟到第一次真正用到时才创建。
+  memory: () => getDocumentMemory(),
   name: '公文写作助手',
   instructions: `你是一个简洁、友好的中文公文写作助手。
 

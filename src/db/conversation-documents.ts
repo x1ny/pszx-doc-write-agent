@@ -2,7 +2,7 @@ import "server-only"
 
 import { and, eq, sql } from "drizzle-orm"
 
-import { db } from "@/db/client"
+import { getDb } from "@/db/client"
 import {
   conversationDocuments,
   type ConversationDocument,
@@ -42,7 +42,7 @@ export async function getConversationDocument(
   resourceId: string,
   threadId: string
 ) {
-  const [document] = await db
+  const [document] = await getDb()
     .select()
     .from(conversationDocuments)
     .where(
@@ -60,7 +60,7 @@ export async function deleteConversationDocument(
   resourceId: string,
   threadId: string
 ) {
-  await db
+  await getDb()
     .delete(conversationDocuments)
     .where(
       and(
@@ -81,7 +81,7 @@ export async function saveConversationDocument({
   const now = new Date()
 
   if (expectedVersion === null) {
-    const [createdDocument] = await db
+    const [createdDocument] = await getDb()
       .insert(conversationDocuments)
       .values({
         resourceId,
@@ -107,7 +107,7 @@ export async function saveConversationDocument({
       }
     }
   } else {
-    const [updatedDocument] = await db
+    const [updatedDocument] = await getDb()
       .update(conversationDocuments)
       .set({
         filename,

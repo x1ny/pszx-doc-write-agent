@@ -10,7 +10,8 @@ const prompt = process.argv.slice(2).join(' ').trim() ||
   '请帮我把当前公文改成李局长的写作风格';
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
-const { mastra } = await jiti.import('../src/mastra/index.ts');
+const { getMastra } = await jiti.import('../src/mastra/index.ts');
+const mastra = getMastra();
 const { simulateLeaderStyleAnalysis } = await jiti.import(
   '../src/mastra/document/leader-style.ts'
 );

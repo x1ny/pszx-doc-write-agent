@@ -12,6 +12,20 @@ export type ChatThreadSummary = {
 
 let fallbackBrowserResourceId: string | null = null
 
+// crypto.randomUUID 只在安全上下文可用，用局域网 IP 走 http 访问时它是 undefined。
+// getRandomValues 没有这个限制，退化到它同样能生成足够随机的会话标识。
+function randomSessionId() {
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    ""
+  )
+}
+
 export function isBrowserResourceId(value: unknown): value is string {
   return typeof value === "string" && browserResourceIdPattern.test(value)
 }
@@ -21,7 +35,7 @@ export function isChatThreadId(value: unknown): value is string {
 }
 
 export function createChatThreadId() {
-  return `chat-${crypto.randomUUID()}`
+  return `chat-${randomSessionId()}`
 }
 
 export function getBrowserResourceId() {
@@ -36,11 +50,11 @@ export function getBrowserResourceId() {
       return existingId
     }
 
-    const resourceId = `browser-${crypto.randomUUID()}`
+    const resourceId = `browser-${randomSessionId()}`
     window.localStorage.setItem(chatResourceStorageKey, resourceId)
     return resourceId
   } catch {
-    fallbackBrowserResourceId ??= `browser-${crypto.randomUUID()}`
+    fallbackBrowserResourceId ??= `browser-${randomSessionId()}`
     return fallbackBrowserResourceId
   }
 }

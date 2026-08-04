@@ -2,7 +2,7 @@ import { handleChatStream } from '@mastra/ai-sdk';
 import type { AlibabaLanguageModelOptions } from '@ai-sdk/alibaba';
 import { createUIMessageStreamResponse } from 'ai';
 
-import { mastra } from '@/mastra';
+import { getMastra } from '@/mastra';
 import { clientTools } from '@/mastra/document/tools';
 
 export const runtime = 'nodejs';
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   const params = await request.json();
 
   const stream = await handleChatStream({
-    mastra,
+    mastra: getMastra(),
     agentId: 'document-agent',
     params,
     defaultOptions: {

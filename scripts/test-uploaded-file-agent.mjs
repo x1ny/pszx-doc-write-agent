@@ -55,7 +55,8 @@ globalThis.fetch = captureRequest;
 
 const { createJiti } = await import('jiti');
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
-const { mastra } = await jiti.import('../src/mastra/index.ts');
+const { getMastra } = await jiti.import('../src/mastra/index.ts');
+const mastra = getMastra();
 const agent = mastra.getAgentById('document-agent');
 
 const inputMessage = {
